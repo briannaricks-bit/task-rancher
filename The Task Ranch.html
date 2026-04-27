@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- iOS home screen / PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="The Task Ranch" />
+  <meta name="theme-color" content="#F8F0E0" />
+  <title>🤠 The Task Ranch</title>
+
+  <!-- React + Babel via CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #F8F0E0;
+      font-family: Georgia, 'Times New Roman', serif;
+      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;
+    }
+    #root { min-height: 100%; }
+
+    /* Prevent double-tap zoom on buttons */
+    button, input, select, textarea { touch-action: manipulation; }
+
+    /* Safe area for iPhone notch / home bar */
+    .safe-wrap {
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right));
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #FBF2E0; }
+    ::-webkit-scrollbar-thumb { background: #C4A47A88; border-radius: 3px; }
+
+    /* Animations */
+    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+
+    /* iOS time picker tint */
+    input[type=time]::-webkit-calendar-picker-indicator {
+      filter: sepia(1) saturate(2) hue-rotate(10deg) brightness(0.7);
+    }
+    select option { background: #FFF8EE; color: #3D1C08; }
+    button:active { transform: scale(0.96); }
+
+    /* ── Mobile layout overrides ── */
+    @media (max-width: 520px) {
+      .summary-grid   { grid-template-columns: repeat(3, 1fr) !important; }
+      .metrics-grid   { grid-template-columns: 1fr !important; }
+      .rate-grid      { grid-template-columns: repeat(3, 1fr) !important; }
+      .tab-label-full { display: none; }
+      .tab-label-icon { display: inline !important; }
+      .block-row      { flex-wrap: wrap; gap: 6px !important; }
+      .block-time     { min-width: unset !important; width: 100%; }
+      .block-task     { width: 100%; }
+      .block-actions  { width: 100%; display: flex; justify-content: flex-end; }
+      .edit-grid      { grid-template-columns: 1fr 1fr !important; }
+      .edit-grid-full { grid-template-columns: 1fr !important; }
+      .add-grid       { grid-template-columns: 1fr 1fr !important; }
+      .add-grid-name  { grid-column: 1 / -1 !important; }
+      .quota-mini-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      h1 { font-size: 26px !important; }
+      .tab-btn { padding: 8px 12px !important; font-size: 12px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const COLORS = {
+      pink:   "#B85673",
+      cyan:   "#3D8B8A",
+      yellow: "#C4860A",
+      purple: "#8B6BAD",
+      green:  "#5E8B5A",
+      orange: "#B85C34",
+    };
+
+    const DEFAULT_BLOCKS = [
+      { id: 1, task: "Morning Stand-Up & Prioritization", start: "08:00", end: "08:30", category: "admin",     color: "purple" },
+      { id: 2, task: "Comment Moderation — Batch 1",      start: "08:30", end: "10:00", category: "comments",  color: "cyan"   },
+      { id: 3, task: "Response Writing — Wave 1",         start: "10:00", end: "11:00", category: "responses", color: "pink"   },
+      { id: 4, task: "Comment Moderation — Batch 2",      start: "11:00", end: "12:30", category: "comments",  color: "cyan"   },
+      { id: 5, task: "Lunch Break",                       start: "12:30", end: "13:30", category: "break",     color: "orange" },
+      { id: 6, task: "Comment Moderation — Batch 3",      start: "13:30", end: "15:00", category: "comments",  color: "cyan"   },
+      { id: 7, task: "Response Writing — Wave 2",         start: "15:00", end: "16:00", category: "responses", color: "pink"   },
+      { id: 8, task: "Comment Moderation — Batch 4",      start: "16:00", end: "17:30", category: "comments",  color: "cyan"   },
+      { id: 9, task: "EOD Review & Metrics Check",        start: "17:30", end: "18:00", category: "admin",     color: "purple" },
+    ];
+
+    const CATEGORY_LABELS = {
+      comments: "Comment Mod", responses: "Responses",
+      admin: "Admin", break: "Break", other: "Other",
+    };
+
+    function timeToMins(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+    function minsToTime(m) {
+      return `${Math.floor(m/60).toString().padStart(2,"0")}:${(m%60).toString().padStart(2,"0")}`;
+    }
+    function duration(s, e) { return timeToMins(e) - timeToMins(s); }
+    function fmt12(t) {
+      const [h, m] = t.split(":").map(Number);
+      const p = h >= 12 ? "PM" : "AM", hr = h % 12 === 0 ? 12 : h % 12;
+      return `${hr}:${m.toString().padStart(2,"0")} ${p}`;
+    }
+    function parseFlexTime(str) {
+      str = str.trim().toLowerCase().replace(/\s+/g,"");
+      const ampm = str.includes("am") ? "am" : str.includes("pm") ? "pm" : null;
+      const clean = str.replace("am","").replace("pm","");
+      let h, m = 0;
+      if (clean.includes(":")) [h, m] = clean.split(":").map(Number);
+      else h = parseInt(clean);
+      if (isNaN(h)) return null;
+      if (ampm === "pm" && h !== 12) h += 12;
+      if (ampm === "am" && h === 12) h = 0;
+      if (h < 0 || h > 23) return null;
+      return `${h.toString().padStart(2,"0")}:${(m||0).toString().padStart(2,"0")}`;
+    }
+    function parseDaySchedule(text) {
+      const parts = text.split(/[-–]|to/i).map(s => s.trim());
+      if (parts.length < 2) return null;
+      const start = parseFlexTime(parts[0]), end = parseFlexTime(parts[1]);
+      if (!start || !end) return null;
+      return { start, end };
+    }
+    function rescaleBlocks(blocks, ns, ne) {
+      const nS = timeToMins(ns), nE = timeToMins(ne), nD = nE - nS;
+      const oS = Math.min(...blocks.map(b => timeToMins(b.start)));
+      const oE = Math.max(...blocks.map(b => timeToMins(b.end)));
+      const oD = oE - oS;
+      if (oD === 0) return blocks;
+      return blocks.map(b => {
+        const sS = Math.round((nS + ((timeToMins(b.start)-oS)/oD)*nD)/5)*5;
+        const sE = Math.round((nS + ((timeToMins(b.end)  -oS)/oD)*nD)/5)*5;
+        return { ...b, start: minsToTime(Math.max(0,sS)), end: minsToTime(Math.min(1439,sE)) };
+      });
+    }
+
+    function App() {
+      const [blocks,      setBlocks]      = useState(DEFAULT_BLOCKS);
+      const [metrics,     setMetrics]     = useState({ resolved:247, responses:28, resolvedGoal:500, responseGoal:50 });
+      const [editingId,   setEditingId]   = useState(null);
+      const [editForm,    setEditForm]    = useState({});
+      const [showAdd,     setShowAdd]     = useState(false);
+      const [newTask,     setNewTask]     = useState({ task:"", start:"", end:"", category:"other", color:"green" });
+      const [activeTab,   setActiveTab]   = useState("schedule");
+      const [aiLoading,   setAiLoading]   = useState(false);
+      const [aiSugg,      setAiSugg]      = useState(null);
+      const [aiInput,     setAiInput]     = useState("");
+      const [schedText,   setSchedText]   = useState("8:00 AM - 6:00 PM");
+      const [schedErr,    setSchedErr]    = useState(null);
+      const [dayStart,    setDayStart]    = useState("08:00");
+      const [dayEnd,      setDayEnd]      = useState("18:00");
+
+      // ── Hootsuite sync state ──
+      const lsGet = k => { try { return localStorage.getItem(k)||''; } catch(e){ return ''; } };
+      const lsSet = (k,v) => { try { localStorage.setItem(k,v); } catch(e){} };
+      const [hsToken,      setHsTokenRaw] = useState(() => lsGet('hs_token'));
+      const [hsProfiles,   setHsProfiles] = useState([]);
+      const [hsSyncStatus, setHsSyncStatus] = useState(null);
+      const [hsLastSync,   setHsLastSync]  = useState(() => lsGet('hs_last_sync'));
+      const [hsShowSync,   setHsShowSync]  = useState(false);
+      const [hsAutoSync,   setHsAutoSync]  = useState(() => lsGet('hs_auto_sync')==='true');
+      const didAutoSync = useRef(false);
+
+      const saveHsToken = v => { setHsTokenRaw(v); lsSet('hs_token', v); };
+      const saveHsAutoSync = v => { setHsAutoSync(v); lsSet('hs_auto_sync', String(v)); };
+
+      // ── Live clock ──
+      const TIMEZONES = [
+        { label:"🌅 Eastern (ET)",        tz:"America/New_York"      },
+        { label:"🌾 Central (CT)",         tz:"America/Chicago"       },
+        { label:"🏔 Mountain (MT)",        tz:"America/Denver"        },
+        { label:"🌊 Pacific (PT)",         tz:"America/Los_Angeles"   },
+        { label:"🐻 Alaska (AKT)",         tz:"America/Anchorage"     },
+        { label:"🌺 Hawaii (HST)",         tz:"Pacific/Honolulu"      },
+        { label:"🗽 Atlantic (AT)",        tz:"America/Halifax"       },
+        { label:"🗼 London (GMT/BST)",     tz:"Europe/London"         },
+        { label:"🥐 Paris (CET)",          tz:"Europe/Paris"          },
+        { label:"🌏 Tokyo (JST)",          tz:"Asia/Tokyo"            },
+        { label:"🦘 Sydney (AEDT)",        tz:"Australia/Sydney"      },
+      ];
+      const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const [clockTz,  setClockTzRaw] = useState(() => lsGet('clock_tz') || localTz);
+      const [liveTime, setLiveTime]   = useState(new Date());
+      const saveClockTz = v => { setClockTzRaw(v); lsSet('clock_tz', v); };
+
+      useEffect(() => {
+        const id = setInterval(() => setLiveTime(new Date()), 1000);
+        return () => clearInterval(id);
+      }, []);
+
+      const fmtClock = (date, tz) => date.toLocaleTimeString('en-US', {
+        timeZone: tz, hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+      });
+      const fmtDate = (date, tz) => date.toLocaleDateString('en-US', {
+        timeZone: tz, weekday:'long', month:'long', day:'numeric'
+      });
+      const tzLabel = TIMEZONES.find(t=>t.tz===clockTz)?.label || clockTz;
+
+      const rGoal = metrics.resolvedGoal, rsGoal = metrics.responseGoal;
+      const rPct  = Math.min(100, Math.round((metrics.resolved  / Math.max(1,rGoal))  * 100));
+      const rsPct = Math.min(100, Math.round((metrics.responses / Math.max(1,rsGoal)) * 100));
+      const rRate = metrics.resolved > 0 ? ((metrics.responses/metrics.resolved)*100).toFixed(1) : "0.0";
+
+      const totalWork    = blocks.filter(b=>b.category!=="break").reduce((s,b)=>s+duration(b.start,b.end),0);
+      const commentMins  = blocks.filter(b=>b.category==="comments").reduce((s,b)=>s+duration(b.start,b.end),0);
+      const remaining    = Math.max(0, rGoal - metrics.resolved);
+      const cBlocks      = blocks.filter(b=>b.category==="comments");
+      const totalCMins   = cBlocks.reduce((s,b)=>s+duration(b.start,b.end),0);
+      const cQuotas = cBlocks.reduce((acc,b)=>{
+        acc[b.id] = Math.round(metrics.resolvedGoal * (totalCMins>0 ? duration(b.start,b.end)/totalCMins : 0));
+        return acc;
+      },{});
+      const cDone = cBlocks.reduce((acc,b)=>{
+        acc[b.id] = Math.min(cQuotas[b.id]||0, Math.round(metrics.resolved * (totalCMins>0 ? duration(b.start,b.end)/totalCMins : 0)));
+        return acc;
+      },{});
+      const cTargets = cBlocks.reduce((acc,b)=>{
+        acc[b.id] = Math.max(0, (cQuotas[b.id]||0) - (cDone[b.id]||0));
+        return acc;
+      },{});
+      const cPerMin = totalCMins > 0 ? (remaining/totalCMins).toFixed(2) : 0;
+      const cCPH = cBlocks.reduce((acc,b)=>{
+        const hrs = duration(b.start,b.end) / 60;
+        acc[b.id] = hrs > 0 ? Math.round((cTargets[b.id]||0) / hrs) : 0;
+        return acc;
+      },{});
+      const overallCPH = totalCMins > 0 ? Math.round(remaining / (totalCMins/60)) : 0;
+
+      const C = k => COLORS[k] || COLORS.cyan;
+      const acc = c => ({ color: C(c), fontWeight:"700" });
+      const card = c => ({ border:`2px solid ${C(c)}`, boxShadow:`2px 2px 0 ${C(c)}44, 4px 4px 12px rgba(90,40,10,0.1)` });
+      const inp = (extra={}) => ({
+        background:"#FFF8EE", border:"1.5px solid #C4A47A", color:"#3D1C08",
+        padding:"8px 10px", borderRadius:8, fontSize:15, outline:"none",
+        fontFamily:"Georgia,serif", width:"100%", boxSizing:"border-box", ...extra
+      });
+      const btn = (c="cyan",extra={}) => ({
+        background: C(c)+"18", border:`1.5px solid ${C(c)}`, color:C(c),
+        padding:"8px 16px", borderRadius:20, fontSize:13, cursor:"pointer",
+        fontFamily:"Georgia,serif", fontWeight:"700", letterSpacing:0.5,
+        WebkitTapHighlightColor:"transparent", ...extra
+      });
+
+      const startEdit = b => { setEditingId(b.id); setEditForm({...b}); };
+      const saveEdit  = () => {
+        const orig = blocks.find(b=>b.id===editingId);
+        const delta = timeToMins(editForm.end) - timeToMins(orig.end);
+        setBlocks(blocks.map(b => {
+          if (b.id === editingId) return {...editForm};
+          if (timeToMins(b.start) >= timeToMins(orig.end))
+            return {...b, start:minsToTime(Math.max(0,timeToMins(b.start)+delta)), end:minsToTime(Math.min(1439,timeToMins(b.end)+delta))};
+          return b;
+        }).sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setEditingId(null);
+      };
+      const delBlock = id => setBlocks(blocks.filter(b=>b.id!==id));
+      const addBlock = () => {
+        if (!newTask.task||!newTask.start||!newTask.end) return;
+        setBlocks([...blocks,{...newTask,id:Date.now()}].sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setNewTask({task:"",start:"",end:"",category:"other",color:"green"});
+        setShowAdd(false);
+      };
+      const applySchedule = () => {
+        const p = parseDaySchedule(schedText);
+        if (!p) { setSchedErr("Couldn't parse — try: 8 am - 4 pm"); return; }
+        setDayStart(p.start); setDayEnd(p.end);
+        setBlocks(rescaleBlocks(blocks, p.start, p.end));
+        setSchedErr(null);
+      };
+
+      const askAI = async () => {
+        if (!aiInput.trim()) return;
+        setAiLoading(true); setAiSugg(null);
+        const schedStr = blocks.map(b=>`${b.start}-${b.end}: ${b.task}`).join("\n");
+        try {
+          const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({
+              model:"claude-sonnet-4-20250514", max_tokens:1000,
+              messages:[{ role:"user", content:`You are a productivity scheduler. Here is the current schedule:\n${schedStr}\n\nThe user wants to add this task: "${aiInput}"\n\nFind the best available time slot and respond ONLY with a JSON object (no markdown, no explanation) with these fields: { "task": string, "start": "HH:MM", "end": "HH:MM", "category": "comments|responses|admin|break|other", "color": "pink|cyan|yellow|purple|green|orange", "reason": string (1 sentence why this slot works) }` }]
+            })
+          });
+          const data = await resp.json();
+          const text = data.content?.find(c=>c.type==="text")?.text||"";
+          setAiSugg(JSON.parse(text.replace(/```json|```/g,"").trim()));
+        } catch(e) { setAiSugg({error:"Couldn't rustle up a suggestion. Try again, partner."}); }
+        setAiLoading(false);
+      };
+      const acceptSugg = () => {
+        if (!aiSugg||aiSugg.error) return;
+        const nb = {...aiSugg, id:Date.now()}; delete nb.reason;
+        setBlocks([...blocks,nb].sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setAiSugg(null); setAiInput(""); setActiveTab("schedule");
+      };
+
+      // ── Hootsuite API sync ──
+      const syncHootsuite = async (token) => {
+        const tok = (token || hsToken).trim();
+        if (!tok) { setHsSyncStatus({ error: "Paste your Hootsuite Bearer token first, partner." }); return; }
+        setHsSyncStatus('loading');
+
+        const headers = { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' };
+        const BASE = 'https://platform.hootsuite.com/v1';
+
+        try {
+          const meResp = await fetch(`${BASE}/me`, { headers });
+          if (!meResp.ok) {
+            const body = await meResp.json().catch(()=>({}));
+            setHsSyncStatus({ error: `Token rejected (${meResp.status}): ${body.message || 'Double-check your Hootsuite access token.'}` });
+            return;
+          }
+
+          if (hsProfiles.length === 0) {
+            const pResp = await fetch(`${BASE}/socialProfiles`, { headers });
+            if (pResp.ok) { const pd = await pResp.json(); setHsProfiles(pd.data || []); }
+          }
+
+          const now   = new Date();
+          const start = new Date(now); start.setHours(0,0,0,0);
+          const end   = new Date(now); end.setHours(23,59,59,999);
+          const qs    = `startTime=${start.toISOString()}&endTime=${end.toISOString()}`;
+
+          let newResolved = null;
+          const resolvedResp = await fetch(`${BASE}/inbox/conversations?state=RESOLVED&${qs}&limit=1000`, { headers });
+          if (resolvedResp.ok) {
+            const rd = await resolvedResp.json();
+            newResolved = rd.total ?? rd.data?.length ?? null;
+          }
+
+          if (newResolved === null || newResolved === 0) {
+            const inpResp = await fetch(`${BASE}/inbox/conversations?${qs}&limit=1000`, { headers });
+            if (inpResp.ok) {
+              const ind = await inpResp.json();
+              newResolved = ind.total ?? ind.data?.length ?? null;
+            }
+          }
+
+          let newResponses = null;
+          const msgResp = await fetch(`${BASE}/messages?${qs}&limit=1000`, { headers });
+          if (msgResp.ok) {
+            const md = await msgResp.json();
+            const sent = (md.data || []).filter(m => m.state === 'SENT' || m.state === 'PUBLISHED');
+            newResponses = md.total ?? sent.length ?? null;
+          }
+
+          setMetrics(m => ({
+            ...m,
+            ...(newResolved  !== null ? { resolved:  newResolved  } : {}),
+            ...(newResponses !== null ? { responses: newResponses } : {}),
+          }));
+
+          const ts = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+          setHsLastSync(ts); lsSet('hs_last_sync', ts);
+          setHsSyncStatus('success');
+
+        } catch(e) {
+          const isCors = e.message?.toLowerCase().includes('fetch') || e.message?.toLowerCase().includes('network');
+          setHsSyncStatus({
+            error: isCors
+              ? `Network/CORS error: Hootsuite may not allow requests from this origin. Try using the deployed version of the app (angelapps.io) or contact your Hootsuite admin to whitelist this domain.`
+              : `Error: ${e.message}`
+          });
+        }
+      };
+
+      useEffect(() => {
+        if (hsAutoSync && hsToken && !didAutoSync.current) {
+          didAutoSync.current = true;
+          syncHootsuite(hsToken);
+        }
+      }, []);
+
+      const TABS = [
+        ["schedule", "🌵", "Round-Up"],
+        ["metrics",  "📋", "The Tally"],
+        ["ai",       "🌟", "Trail Boss"],
+      ];
+
+      return (
+        <div style={{ background:"#F8F0E0", minHeight:"100vh", fontFamily:"Georgia,'Times New Roman',serif", color:"#3D1C08", position:"relative", overflowX:"hidden" }}>
+
+          {/* Cow print background */}
+          <svg style={{ position:"fixed", inset:0, width:"100%", height:"100%", pointerEvents:"none", zIndex:0, opacity:0.13 }} xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="cowprint" x="0" y="0" width="420" height="320" patternUnits="userSpaceOnUse">
+                <path d="M22,58 C10,36 26,12 54,16 C82,20 94,44 88,68 C82,92 58,100 36,90 C14,80 34,80 22,58 Z" fill="#3D1C08"/>
+                <path d="M148,18 C168,4 200,8 210,30 C220,52 205,72 182,74 C159,76 142,58 148,18 Z" fill="#3D1C08"/>
+                <path d="M318,24 C330,14 350,20 354,38 C358,56 342,68 326,62 C310,56 306,34 318,24 Z" fill="#3D1C08"/>
+                <path d="M8,148 C4,122 20,102 44,106 C68,110 76,134 70,158 C64,182 40,190 20,178 C0,166 12,174 8,148 Z" fill="#3D1C08"/>
+                <path d="M155,108 C148,82 168,64 196,70 C224,76 236,102 228,130 C220,158 194,168 170,158 C146,148 162,134 155,108 Z" fill="#3D1C08"/>
+                <path d="M330,100 C344,82 370,86 378,110 C386,134 368,154 346,150 C324,146 316,118 330,100 Z" fill="#3D1C08"/>
+                <path d="M14,228 C6,206 22,184 52,186 C82,188 96,214 86,240 C76,266 46,272 22,258 C-2,244 22,250 14,228 Z" fill="#3D1C08"/>
+                <path d="M112,250 C120,238 138,242 142,256 C146,270 134,280 120,276 C106,272 104,262 112,250 Z" fill="#3D1C08"/>
+                <path d="M196,234 C190,212 210,196 238,202 C266,208 274,232 262,254 C250,276 222,280 202,266 C182,252 202,256 196,234 Z" fill="#3D1C08"/>
+                <path d="M338,220 C350,202 376,206 382,228 C388,250 370,268 348,264 C326,260 326,238 338,220 Z" fill="#3D1C08"/>
+                <path d="M82,86 C88,78 100,82 102,92 C104,102 94,108 84,104 C74,100 76,94 82,86 Z" fill="#3D1C08"/>
+                <path d="M268,56 C274,48 286,52 288,62 C290,72 280,78 270,74 C260,70 262,64 268,56 Z" fill="#3D1C08"/>
+                <path d="M398,168 C404,158 416,162 418,174 C420,186 410,192 400,188 C390,184 392,178 398,168 Z" fill="#3D1C08"/>
+                <path d="M130,174 C136,166 148,170 150,182 C152,194 140,200 130,194 C120,188 124,182 130,174 Z" fill="#3D1C08"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#cowprint)"/>
+          </svg>
+
+          <div className="safe-wrap" style={{ position:"relative", zIndex:2, maxWidth:860, margin:"0 auto", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+
+            {/* Header */}
+            <div style={{ textAlign:"center", padding:"28px 0 14px" }}>
+              <div style={{ fontSize:11, letterSpacing:5, color:"#B85C34", marginBottom:6 }}>✦ HOWDY, PARTNER ✦</div>
+              <h1 style={{ fontSize:32, fontWeight:"bold", margin:0, letterSpacing:2, color:"#3D1C08", textTransform:"uppercase", textShadow:"2px 2px 0 rgba(180,100,40,0.2)" }}>
+                🤠 The Task Ranch
+              </h1>
+              <div style={{ fontSize:11, letterSpacing:2, color:"#9B7A5E", marginTop:5 }}>✦ Your Daily Wrangling Headquarters ✦</div>
+
+              {/* Live Clock */}
+              <div style={{ marginTop:14, display:"inline-flex", flexDirection:"column", alignItems:"center", background:"#FFF8EE", border:"2px solid #C4A47A", borderRadius:12, padding:"10px 20px", boxShadow:"2px 2px 0 #C4A47A44" }}>
+                <div style={{ fontSize:28, fontWeight:"bold", color:"#3D1C08", letterSpacing:2, fontVariantNumeric:"tabular-nums", fontFamily:"Georgia,serif" }}>
+                  {fmtClock(liveTime, clockTz)}
+                </div>
+                <div style={{ fontSize:11, color:"#9B7A5E", marginTop:2, letterSpacing:1 }}>
+                  {fmtDate(liveTime, clockTz)}
+                </div>
+                <select
+                  value={clockTz}
+                  onChange={e => saveClockTz(e.target.value)}
+                  style={{ marginTop:8, background:"#FFF8EE", border:"1px solid #C4A47A", color:"#B85C34", padding:"4px 8px", borderRadius:20, fontSize:11, fontFamily:"Georgia,serif", fontWeight:"700", cursor:"pointer", outline:"none" }}>
+                  <option value={localTz}>📍 Local ({localTz})</option>
+                  {TIMEZONES.map(t => <option key={t.tz} value={t.tz}>{t.label}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:10, justifyContent:"center" }}>
+                <div style={{ height:1, width:60, background:"linear-gradient(to right,transparent,#C4A47A)" }}/>
+                <span style={{ color:"#C4860A", fontSize:14 }}>✦</span>
+                <div style={{ height:1, width:60, background:"linear-gradient(to left,transparent,#C4A47A)" }}/>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display:"flex", gap:4, marginBottom:18, borderBottom:"2px solid #C4A47A55" }}>
+              {TABS.map(([key, icon, label]) => (
+                <button key={key} className="tab-btn" onClick={()=>setActiveTab(key)} style={{
+                  background: activeTab===key ? "#FFF8EE" : "transparent",
+                  border: activeTab===key ? "2px solid #C4A47A" : "2px solid transparent",
+                  borderBottom: activeTab===key ? "2px solid #FFF8EE" : "2px solid transparent",
+                  color: activeTab===key ? "#3D1C08" : "#9B7A5E",
+                  padding:"8px 16px", borderRadius:"8px 8px 0 0", fontSize:13,
+                  cursor:"pointer", fontFamily:"Georgia,serif", fontWeight:activeTab===key?"700":"400",
+                  marginBottom:"-2px", WebkitTapHighlightColor:"transparent",
+                }}>
+                  {icon} <span className="tab-label-full">{label}</span>
+                  <span className="tab-label-icon" style={{display:"none"}}></span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── SCHEDULE TAB ── */}
+            {activeTab === "schedule" && (
+              <div>
+                {/* Hours input */}
+                <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+                  <div style={{ fontSize:10, letterSpacing:2, color:"#C4860A", marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>🕐 What Are Yer Hours Today?</div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    <input style={inp({ flex:1, minWidth:160, color:schedErr?"#B85673":"#3D1C08" })}
+                      value={schedText} placeholder="e.g. 8 am - 4 pm"
+                      onChange={e=>{ setSchedText(e.target.value); setSchedErr(null); }}
+                      onKeyDown={e=>e.key==="Enter"&&applySchedule()}
+                    />
+                    <button style={btn("orange")} onClick={applySchedule}>Ride It</button>
+                  </div>
+                  {schedErr && <div style={{ fontSize:11, color:"#B85673", marginTop:6 }}>⚠ {schedErr}</div>}
+                  {!schedErr && <div style={{ fontSize:11, color:"#9B7A5E", marginTop:6 }}>
+                    Today's ride: <strong style={{ color:"#C4860A" }}>{fmt12(dayStart)}</strong> — <strong style={{ color:"#C4860A" }}>{fmt12(dayEnd)}</strong>
+                    <span style={{ marginLeft:8, color:"#B8956A" }}>({Math.floor(duration(dayStart,dayEnd)/60)}h {duration(dayStart,dayEnd)%60}m)</span>
+                  </div>}
+                </div>
+
+                {/* Summary */}
+                <div className="summary-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
+                  {[["🏇 Trail Stops", blocks.filter(b=>b.category!=="break").length,"cyan"],
+                    ["⏱ Ride Time", `${Math.floor(totalWork/60)}h ${totalWork%60}m`,"pink"],
+                    ["🤠 Wrangling", `${Math.floor(commentMins/60)}h ${commentMins%60}m`,"yellow"],
+                  ].map(([label,val,col])=>(
+                    <div key={label} style={{ ...card(col), background:"#FFF8EE", borderRadius:10, padding:"10px 8px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#9B7A5E", marginBottom:3, fontWeight:"600", textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+                      <div style={{ fontSize:20, fontWeight:"bold", ...acc(col) }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Quota breakdown */}
+                {cBlocks.length > 0 && (
+                  <div style={{ ...card("cyan"), background:"#F7F0E3", borderRadius:10, padding:"12px 14px", marginBottom:12 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, flexWrap:"wrap", gap:4 }}>
+                      <span style={{ fontSize:10, letterSpacing:1, color:"#3D8B8A", fontWeight:"700", textTransform:"uppercase" }}>✦ Quota Breakdown</span>
+                      <span style={{ fontSize:11, color:"#9B7A5E" }}>{remaining>0?`${remaining} left`:"🎉 Done!"}</span>
+                    </div>
+                    <div className="quota-mini-grid" style={{ display:"grid", gridTemplateColumns:`repeat(${Math.min(cBlocks.length,4)},1fr)`, gap:6 }}>
+                      {cBlocks.map((b,i)=>{
+                        const pct = Math.min(100, Math.round(((cDone[b.id]||0)/Math.max(1,cQuotas[b.id]||1))*100));
+                        return (
+                          <div key={b.id} style={{ background:"#FFF8EE", border:"1px solid #C4A47A44", borderRadius:8, padding:"6px 8px", textAlign:"center" }}>
+                            <div style={{ fontSize:9, color:"#9B7A5E", fontWeight:"600" }}>Batch {i+1}</div>
+                            <div style={{ fontSize:8, color:"#B8956A", margin:"2px 0" }}>{fmt12(b.start)}–{fmt12(b.end)}</div>
+                            <div style={{ fontSize:20, fontWeight:"bold", ...acc("cyan") }}>{cQuotas[b.id]||0}</div>
+                            <div style={{ fontSize:8, color:"#9B7A5E" }}>goal</div>
+                            <div style={{ background:"#E8D8C0", borderRadius:3, height:4, margin:"4px 0 2px", overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${pct}%`, background:`linear-gradient(90deg,${COLORS.cyan},${COLORS.purple})`, borderRadius:3 }}/>
+                            </div>
+                            <div style={{ fontSize:8, color:C("cyan"), fontWeight:"700" }}>{cDone[b.id]||0} done · {cTargets[b.id]||0} left</div>
+                            {(cTargets[b.id]||0)>0 && <div style={{ fontSize:9, color:C("yellow"), fontWeight:"700", marginTop:2 }}>{cCPH[b.id]}/hr needed</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Blocks */}
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+                  {blocks.map(block=>(
+                    <div key={block.id}>
+                      {editingId===block.id ? (
+                        <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"12px 14px" }}>
+                          <div className="edit-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                            <input className="edit-grid-full" style={{ ...inp(), gridColumn:"1/-1" }} value={editForm.task} onChange={e=>setEditForm({...editForm,task:e.target.value})} placeholder="Task name"/>
+                            <input style={inp()} type="time" value={editForm.start} onChange={e=>setEditForm({...editForm,start:e.target.value})}/>
+                            <input style={inp()} type="time" value={editForm.end}   onChange={e=>setEditForm({...editForm,end:e.target.value})}/>
+                            <select style={inp()} value={editForm.category} onChange={e=>setEditForm({...editForm,category:e.target.value})}>
+                              {Object.entries(CATEGORY_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                            </select>
+                            <select style={inp()} value={editForm.color} onChange={e=>setEditForm({...editForm,color:e.target.value})}>
+                              {Object.keys(COLORS).map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                            </select>
+                          </div>
+                          <div style={{ display:"flex", gap:8 }}>
+                            <button style={btn("green")} onClick={saveEdit}>✓ Save</button>
+                            <button style={btn("pink")} onClick={()=>setEditingId(null)}>✕ Nope</button>
+                          </div>
+                        </div>
+                      ):(
+                        <div className="block-row" style={{ ...card(block.color), background:"#FFF8EE", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+                          <div className="block-time" style={{ minWidth:130, fontSize:12, fontWeight:"700", ...acc(block.color), flexShrink:0 }}>{fmt12(block.start)} – {fmt12(block.end)}</div>
+                          <div className="block-task" style={{ flex:1, fontSize:13, color:"#3D1C08", minWidth:0 }}>{block.task}</div>
+                          <div style={{ fontSize:10, padding:"2px 8px", border:`1.5px solid ${C(block.color)}66`, borderRadius:12, color:C(block.color), fontWeight:"700", flexShrink:0 }}>{CATEGORY_LABELS[block.category]}</div>
+                          <div style={{ fontSize:11, color:"#9B7A5E", flexShrink:0 }}>{duration(block.start,block.end)}m</div>
+                          <div className="block-actions" style={{ display:"flex", gap:6, flexShrink:0 }}>
+                            <button style={btn("yellow",{padding:"4px 12px",fontSize:12})} onClick={()=>startEdit(block)}>Edit</button>
+                            <button style={btn("pink",  {padding:"4px 12px",fontSize:12})} onClick={()=>delBlock(block.id)}>✕</button>
+                          </div>
+                          {block.category==="comments"&&(cQuotas[block.id]||0)>0&&(()=>{
+                            const quota = cQuotas[block.id]||0;
+                            const done  = cDone[block.id]||0;
+                            const left  = cTargets[block.id]||0;
+                            const pct   = Math.min(100, Math.round((done/Math.max(1,quota))*100));
+                            return (
+                              <div style={{ width:"100%", marginTop:6, paddingTop:6, borderTop:`1px dashed ${C(block.color)}44` }}>
+                                {left>0 && (
+                                  <div style={{ background:"#FFF3E0", border:`1.5px solid ${C("yellow")}`, borderRadius:8, padding:"6px 10px", marginBottom:8, display:"flex", alignItems:"baseline", gap:6, flexWrap:"wrap" }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase", letterSpacing:1 }}>Needed pace</span>
+                                    <span style={{ fontSize:26, fontWeight:"bold", ...acc("yellow"), lineHeight:1 }}>{cCPH[block.id]}</span>
+                                    <span style={{ fontSize:12, color:"#C4860A", fontWeight:"700" }}>comments/hr</span>
+                                    <span style={{ fontSize:10, color:"#9B7A5E", marginLeft:4 }}>({left} left in {duration(block.start,block.end)}m)</span>
+                                  </div>
+                                )}
+                                <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:5 }}>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Goal</span>
+                                    <span style={{ fontSize:22, fontWeight:"bold", ...acc("cyan") }}>{quota}</span>
+                                  </div>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Done</span>
+                                    <span style={{ fontSize:16, fontWeight:"700", ...acc("green") }}>{done}</span>
+                                  </div>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Left</span>
+                                    <span style={{ fontSize:16, fontWeight:"700", ...acc(left>0?"yellow":"green") }}>{left>0?left:"✓"}</span>
+                                  </div>
+                                </div>
+                                <div style={{ background:"#E8D8C0", borderRadius:4, height:6, overflow:"hidden" }}>
+                                  <div style={{ height:"100%", width:`${pct}%`, background:pct>=100?`linear-gradient(90deg,${C("green")},${C("cyan")})`:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:4, transition:"width 0.4s" }}/>
+                                </div>
+                                <div style={{ fontSize:9, color:"#9B7A5E", textAlign:"right", marginTop:2 }}>{pct}% of batch goal</div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add block */}
+                {!showAdd ? (
+                  <button style={{ ...btn("green"), width:"100%", padding:"12px", fontSize:14 }} onClick={()=>setShowAdd(true)}>＋ Add Trail Stop</button>
+                ):(
+                  <div style={{ ...card("green"), background:"#F7F5EE", borderRadius:10, padding:"14px" }}>
+                    <div style={{ fontSize:11, color:C("green"), marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>✦ New Trail Stop</div>
+                    <div className="add-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                      <input className="add-grid-name" style={{ ...inp(), gridColumn:"1/-1" }} placeholder="Task name" value={newTask.task} onChange={e=>setNewTask({...newTask,task:e.target.value})}/>
+                      <input style={inp()} type="time" value={newTask.start} onChange={e=>setNewTask({...newTask,start:e.target.value})}/>
+                      <input style={inp()} type="time" value={newTask.end}   onChange={e=>setNewTask({...newTask,end:e.target.value})}/>
+                      <select style={inp()} value={newTask.category} onChange={e=>setNewTask({...newTask,category:e.target.value})}>
+                        {Object.entries(CATEGORY_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                      </select>
+                      <select style={inp()} value={newTask.color} onChange={e=>setNewTask({...newTask,color:e.target.value})}>
+                        {Object.keys(COLORS).map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button style={btn("green")} onClick={addBlock}>Add Block</button>
+                      <button style={btn("pink")}  onClick={()=>setShowAdd(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── METRICS TAB ── */}
+            {activeTab === "metrics" && (
+              <div>
+
+                {/* Hootsuite Sync Panel */}
+                <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, marginBottom:16 }}>
+                  <div style={{ padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", WebkitTapHighlightColor:"transparent" }}
+                    onClick={()=>setHsShowSync(v=>!v)}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:16 }}>🦉</span>
+                      <div>
+                        <div style={{ fontSize:11, fontWeight:"700", color:C("purple"), letterSpacing:1, textTransform:"uppercase" }}>Hootsuite Sync</div>
+                        <div style={{ fontSize:10, color:"#9B7A5E" }}>
+                          {hsSyncStatus==='loading' ? "Syncing..." :
+                           hsSyncStatus==='success' ? `✓ Last synced ${hsLastSync}` :
+                           hsSyncStatus?.error ? "⚠ Sync error" :
+                           hsLastSync ? `Last synced ${hsLastSync}` : "Not yet synced"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      {hsToken && hsSyncStatus!=='loading' && (
+                        <button style={btn("purple",{padding:"6px 14px",fontSize:12})}
+                          onClick={e=>{ e.stopPropagation(); syncHootsuite(); }}>
+                          {hsSyncStatus==='loading' ? "⏳" : "🔄 Sync"}
+                        </button>
+                      )}
+                      <span style={{ color:C("purple"), fontSize:14 }}>{hsShowSync?"▲":"▼"}</span>
+                    </div>
+                  </div>
+
+                  {hsShowSync && (
+                    <div style={{ borderTop:"1px dashed #8B6BAD55", padding:"14px" }}>
+                      <div style={{ fontSize:11, color:"#6B4E35", marginBottom:12, lineHeight:1.7 }}>
+                        Paste your Hootsuite <strong>Bearer access token</strong> below. It's stored only on this device and never sent anywhere except Hootsuite's own API. To get one: Hootsuite → <em>My Profile → Security → Developer Tools → Generate Token</em>.
+                      </div>
+
+                      <div style={{ marginBottom:10 }}>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Access Token</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                          <input
+                            type="password"
+                            style={{ ...inp(), flex:1, fontFamily:"monospace", fontSize:13 }}
+                            placeholder="Paste Bearer token here..."
+                            value={hsToken}
+                            onChange={e => saveHsToken(e.target.value)}
+                          />
+                          {hsToken && (
+                            <button style={btn("pink",{padding:"8px 12px",fontSize:12})}
+                              onClick={()=>{ saveHsToken(''); setHsSyncStatus(null); setHsLastSync(''); lsSet('hs_last_sync',''); }}>
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                        <input type="checkbox" id="hs-auto" checked={hsAutoSync}
+                          onChange={e=>saveHsAutoSync(e.target.checked)}
+                          style={{ accentColor:C("purple"), width:16, height:16, cursor:"pointer" }}/>
+                        <label htmlFor="hs-auto" style={{ fontSize:12, color:"#6B4E35", cursor:"pointer" }}>
+                          Auto-sync when app opens
+                        </label>
+                      </div>
+
+                      <button
+                        style={{ ...btn("purple"), width:"100%", padding:"10px", fontSize:13, opacity: (!hsToken||hsSyncStatus==='loading')?0.5:1 }}
+                        onClick={()=>syncHootsuite()}
+                        disabled={!hsToken||hsSyncStatus==='loading'}>
+                        {hsSyncStatus==='loading' ? "🔍 Roundin' up yer stats..." : "🦉 Sync from Hootsuite Now"}
+                      </button>
+
+                      {hsSyncStatus==='success' && (
+                        <div style={{ marginTop:10, background:"#EEF8EE", border:`1px solid ${C("green")}`, borderRadius:8, padding:"10px 12px", fontSize:12, color:C("green"), fontWeight:"600" }}>
+                          ✓ Metrics updated from Hootsuite at {hsLastSync}
+                        </div>
+                      )}
+                      {hsSyncStatus?.error && (
+                        <div style={{ marginTop:10, background:"#FEF0F0", border:`1px solid ${C("pink")}`, borderRadius:8, padding:"10px 12px", fontSize:11, color:C("pink"), lineHeight:1.6 }}>
+                          ⚠ {hsSyncStatus.error}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop:12, fontSize:10, color:"#9B7A5E", lineHeight:1.7, borderTop:"1px dashed #C4A47A55", paddingTop:10 }}>
+                        <strong>What gets synced:</strong> Resolved inbox conversations → Comments Wrangled · Outbound sent messages → Replies Lassoed. Both are scoped to today's date.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="metrics-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:18 }}>
+                  {/* Resolved */}
+                  <div style={{ ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>🤠 Comments Wrangled</div>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                      <span style={{ fontSize:36, fontWeight:"bold", ...acc("cyan") }}>{metrics.resolved}</span>
+                      <span style={{ color:"#9B7A5E", fontSize:14 }}>/ {rGoal}</span>
+                    </div>
+                    <div style={{ background:"#E8D8C0", borderRadius:6, height:10, marginBottom:5, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${rPct}%`, background:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    </div>
+                    <div style={{ fontSize:11, color:C("cyan"), textAlign:"right", fontWeight:"700", marginBottom:12 }}>{rPct}% of quota</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Current Tally</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                          <input style={{ ...inp(), flex:1, minWidth:60 }} type="number" min="0" value={metrics.resolved} onChange={e=>setMetrics({...metrics,resolved:Math.max(0,parseInt(e.target.value)||0)})}/>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:Math.max(0,metrics.resolved-1)})}>−1</button>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:metrics.resolved+1})}>+1</button>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:metrics.resolved+10})}>+10</button>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Daily Quota</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                          <input style={{ ...inp(), flex:1 }} type="number" min="1" value={metrics.resolvedGoal} onChange={e=>setMetrics({...metrics,resolvedGoal:Math.max(1,parseInt(e.target.value)||1)})}/>
+                          <button style={btn("orange",{fontSize:11})} onClick={()=>setMetrics({...metrics,resolved:0})}>Reset</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Responses */}
+                  <div style={{ ...card("pink"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>💌 Replies Lassoed</div>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                      <span style={{ fontSize:36, fontWeight:"bold", ...acc("pink") }}>{metrics.responses}</span>
+                      <span style={{ color:"#9B7A5E", fontSize:14 }}>/ {rsGoal}</span>
+                    </div>
+                    <div style={{ background:"#E8D8C0", borderRadius:6, height:10, marginBottom:5, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${rsPct}%`, background:`linear-gradient(90deg,${C("pink")},${C("yellow")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    </div>
+                    <div style={{ fontSize:11, color:C("pink"), textAlign:"right", fontWeight:"700", marginBottom:12 }}>{rsPct}% of quota</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Current Tally</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                          <input style={{ ...inp(), flex:1, minWidth:60 }} type="number" min="0" value={metrics.responses} onChange={e=>setMetrics({...metrics,responses:Math.max(0,parseInt(e.target.value)||0)})}/>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:Math.max(0,metrics.responses-1)})}>−1</button>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:metrics.responses+1})}>+1</button>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:metrics.responses+5})}>+5</button>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Daily Quota</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                          <input style={{ ...inp(), flex:1 }} type="number" min="1" value={metrics.responseGoal} onChange={e=>setMetrics({...metrics,responseGoal:Math.max(1,parseInt(e.target.value)||1)})}/>
+                          <button style={btn("orange",{fontSize:11})} onClick={()=>setMetrics({...metrics,responses:0})}>Reset</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rate */}
+                <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"16px", marginBottom:14 }}>
+                  <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>📊 Reply Rate Roundup</div>
+                  <div className="rate-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:12 }}>
+                    {[["Yer Rate",`${rRate}%`,parseFloat(rRate)>=10?"green":"pink"],
+                      ["Target","10.0%","yellow"],
+                      ["Needed",Math.max(0,Math.ceil(metrics.resolved*0.1)-metrics.responses),"cyan"],
+                    ].map(([label,val,col])=>(
+                      <div key={label} style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>{label}</div>
+                        <div style={{ fontSize:24, fontWeight:"bold", ...acc(col) }}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ background:"#E8D8C0", borderRadius:6, height:14, overflow:"hidden", position:"relative" }}>
+                    <div style={{ height:"100%", width:`${Math.min(100,parseFloat(rRate)*10)}%`, background:parseFloat(rRate)>=10?`linear-gradient(90deg,${C("green")},${C("yellow")})`:`linear-gradient(90deg,${C("pink")},${C("yellow")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", fontSize:9, color:"#3D1C08", fontWeight:"bold", whiteSpace:"nowrap" }}>{rRate}% / 10% target</div>
+                  </div>
+                </div>
+
+                {/* Batch Distribution */}
+                {cBlocks.length > 0 && (
+                  <div style={{ ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"16px", marginBottom:14 }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:C("cyan"), marginBottom:12, fontWeight:"700", textTransform:"uppercase" }}>🗂 Comment Batch Distribution</div>
+                      {remaining > 0 && (
+                      <div style={{ background:"#FFF3E0", border:`1.5px solid ${C("yellow")}`, borderRadius:8, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase", letterSpacing:1 }}>Overall pace needed</span>
+                        <span style={{ fontSize:30, fontWeight:"bold", ...acc("yellow"), lineHeight:1 }}>{overallCPH}</span>
+                        <span style={{ fontSize:13, color:"#C4860A", fontWeight:"700" }}>comments/hr</span>
+                        <span style={{ fontSize:11, color:"#9B7A5E" }}>across {Math.floor(totalCMins/60)}h {totalCMins%60}m of wrangling time</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize:11, color:"#9B7A5E", marginBottom:12 }}>
+                      Your {metrics.resolvedGoal} comment goal, split across each wrangling block by time:
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {cBlocks.map((b,i)=>{
+                        const quota = cQuotas[b.id]||0;
+                        const done  = cDone[b.id]||0;
+                        const left  = cTargets[b.id]||0;
+                        const pct   = Math.min(100, Math.round((done/Math.max(1,quota))*100));
+                        return (
+                          <div key={b.id} style={{ background:"#F7F0E3", border:"1px solid #C4A47A33", borderRadius:8, padding:"10px 12px" }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:6 }}>
+                              <div>
+                                <span style={{ fontSize:11, fontWeight:"700", color:C("cyan") }}>Batch {i+1}</span>
+                                <span style={{ fontSize:10, color:"#9B7A5E", marginLeft:8 }}>{fmt12(b.start)} – {fmt12(b.end)} · {duration(b.start,b.end)}m</span>
+                              </div>
+                              <div style={{ display:"flex", gap:10, alignItems:"baseline", flexWrap:"wrap" }}>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Goal: <strong style={acc("cyan")}>{quota}</strong></span>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Done: <strong style={acc("green")}>{done}</strong></span>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Left: <strong style={acc(left>0?"yellow":"green")}>{left>0?left:"✓"}</strong></span>
+                                {left>0 && <span style={{ fontSize:10, color:C("yellow"), fontWeight:"700" }}>⚡ {cCPH[b.id]}/hr</span>}
+                              </div>
+                            </div>
+                            <div style={{ background:"#E8D8C0", borderRadius:4, height:8, overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${pct}%`, background:pct>=100?`linear-gradient(90deg,${C("green")},${C("cyan")})`:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:4, transition:"width 0.4s" }}/>
+                            </div>
+                            <div style={{ fontSize:9, color:"#9B7A5E", textAlign:"right", marginTop:3 }}>{pct}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop:10, paddingTop:10, borderTop:"1px dashed #C4A47A55", display:"flex", justifyContent:"space-between", fontSize:11, flexWrap:"wrap", gap:4 }}>
+                      <span style={{ color:"#9B7A5E" }}>Total goal: <strong style={acc("cyan")}>{metrics.resolvedGoal}</strong></span>
+                      <span style={{ color:"#9B7A5E" }}>Done: <strong style={acc("green")}>{metrics.resolved}</strong></span>
+                      <span style={{ color:"#9B7A5E" }}>Remaining: <strong style={acc(remaining>0?"yellow":"green")}>{remaining>0?remaining:"✓ All done!"}</strong></span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status */}
+                <div style={{ ...card(rPct>=100&&rsPct>=100?"green":"purple"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, fontWeight:"700", ...acc(rPct>=100&&rsPct>=100?"green":"purple") }}>
+                    {rPct>=100&&rsPct>=100?"🎉 Yeehaw — All Goals Met, Cowpoke!":rPct>=50?"🐴 On the Trail — Keep Ridin'!":"⚡ Fallin' Behind — Giddy Up!"}
+                  </div>
+                  <div style={{ fontSize:11, color:"#9B7A5E", marginTop:5 }}>
+                    {rGoal-metrics.resolved>0?`${rGoal-metrics.resolved} comments left to hit yer daily quota`:"Comments quota complete, partner!"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── AI TAB ── */}
+            {activeTab === "ai" && (
+              <div>
+                <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"18px", marginBottom:14 }}>
+                  <div style={{ fontSize:11, letterSpacing:1, color:C("purple"), marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>🌟 Trail Boss Planner</div>
+                  <div style={{ fontSize:13, color:"#6B4E35", marginBottom:14, lineHeight:1.7 }}>Describe a new task and the Trail Boss will find the best open slot in your schedule, partner.</div>
+                  <textarea style={{ ...inp(), minHeight:80, resize:"vertical", marginBottom:10 }}
+                    placeholder="e.g. '30 min 1:1 with my manager'"
+                    value={aiInput} onChange={e=>setAiInput(e.target.value)}
+                  />
+                  <button style={{ ...btn("purple"), width:"100%", padding:"12px", fontSize:13 }} onClick={askAI} disabled={aiLoading}>
+                    {aiLoading?"🔍 Scoutin' the trail...":"🌟 Find the Best Slot"}
+                  </button>
+                </div>
+
+                {aiLoading&&(
+                  <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"20px", textAlign:"center" }}>
+                    <div style={{ fontSize:13, fontWeight:"700", ...acc("purple") }}>Scoutin' the trail...</div>
+                    <div style={{ marginTop:10, display:"flex", justifyContent:"center", gap:8 }}>
+                      {[0,1,2,3,4].map(i=><div key={i} style={{ width:9, height:9, background:C("purple"), borderRadius:"50%", animation:`bounce ${0.6+i*0.1}s infinite alternate` }}/>)}
+                    </div>
+                  </div>
+                )}
+
+                {aiSugg&&!aiSugg.error&&(
+                  <div style={{ ...card("green"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:C("green"), marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>✦ Recommended Trail Stop</div>
+                    <div style={{ fontSize:15, color:"#3D1C08", marginBottom:4, fontWeight:"600" }}>{aiSugg.task}</div>
+                    <div style={{ fontSize:13, fontWeight:"700", ...acc("green"), marginBottom:8 }}>{fmt12(aiSugg.start)} – {fmt12(aiSugg.end)}</div>
+                    <div style={{ fontSize:12, color:"#6B4E35", borderTop:"1px dashed #C4A47A", paddingTop:10, marginBottom:12, lineHeight:1.6 }}>{aiSugg.reason}</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button style={{ ...btn("green"), flex:1, padding:"10px" }} onClick={acceptSugg}>🤠 Ride It — Add to Schedule</button>
+                      <button style={btn("pink")} onClick={()=>setAiSugg(null)}>Nope</button>
+                    </div>
+                  </div>
+                )}
+
+                {aiSugg?.error&&(
+                  <div style={{ ...card("pink"), background:"#FFF8EE", borderRadius:10, padding:"12px", color:C("pink"), fontSize:12, fontWeight:"600" }}>⚠ {aiSugg.error}</div>
+                )}
+
+                <div style={{ marginTop:16, ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px" }}>
+                  <div style={{ fontSize:10, letterSpacing:1, color:C("cyan"), marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>🗺 Today's Trail Map</div>
+                  {blocks.map(b=>(
+                    <div key={b.id} style={{ display:"flex", gap:10, padding:"5px 0", borderBottom:"1px dashed #C4A47A33", fontSize:12, flexWrap:"wrap" }}>
+                      <span style={{ color:C(b.color), minWidth:140, fontWeight:"700" }}>{fmt12(b.start)}–{fmt12(b.end)}</span>
+                      <span style={{ color:"#3D1C08" }}>{b.task}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>{/* /safe-wrap */}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
