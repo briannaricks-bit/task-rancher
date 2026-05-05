@@ -1,0 +1,1660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- iOS home screen / PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="The Task Ranch" />
+  <meta name="theme-color" content="#F8F0E0" />
+  <title>🤠 The Task Ranch</title>
+
+  <!-- React + Babel via CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #F8F0E0;
+      font-family: Georgia, 'Times New Roman', serif;
+      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;
+    }
+    #root { min-height: 100%; }
+
+    /* Prevent double-tap zoom on buttons */
+    button, input, select, textarea { touch-action: manipulation; }
+
+    /* Safe area for iPhone notch / home bar */
+    .safe-wrap {
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      padding-left: max(16px, env(safe-area-inset-left));
+      padding-right: max(16px, env(safe-area-inset-right));
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #FBF2E0; }
+    ::-webkit-scrollbar-thumb { background: #C4A47A88; border-radius: 3px; }
+
+    /* Animations */
+    @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+
+    /* iOS time picker tint */
+    input[type=time]::-webkit-calendar-picker-indicator {
+      filter: sepia(1) saturate(2) hue-rotate(10deg) brightness(0.7);
+    }
+    select option { background: #FFF8EE; color: #3D1C08; }
+    button:active { transform: scale(0.96); }
+
+    /* ── Mobile layout overrides ── */
+    @media (max-width: 520px) {
+      .summary-grid   { grid-template-columns: repeat(3, 1fr) !important; }
+      .metrics-grid   { grid-template-columns: 1fr !important; }
+      .rate-grid      { grid-template-columns: repeat(3, 1fr) !important; }
+      .tab-label-full { display: none; }
+      .tab-label-icon { display: inline !important; }
+      .block-row      { flex-wrap: wrap; gap: 6px !important; }
+      .block-time     { min-width: unset !important; width: 100%; }
+      .block-task     { width: 100%; }
+      .block-actions  { width: 100%; display: flex; justify-content: flex-end; }
+      .edit-grid      { grid-template-columns: 1fr 1fr !important; }
+      .edit-grid-full { grid-template-columns: 1fr !important; }
+      .add-grid       { grid-template-columns: 1fr 1fr !important; }
+      .add-grid-name  { grid-column: 1 / -1 !important; }
+      .quota-mini-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      h1 { font-size: 26px !important; }
+      .tab-btn { padding: 8px 12px !important; font-size: 12px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const COLORS = {
+      pink:   "#B85673",
+      cyan:   "#3D8B8A",
+      yellow: "#C4860A",
+      purple: "#8B6BAD",
+      green:  "#5E8B5A",
+      orange: "#B85C34",
+    };
+
+    const DAILY_QUOTES = [
+      { quote: "Every complaint is a gift — it's a customer telling you exactly how to win them back.", author: "Shep Hyken" },
+      { quote: "Your most unhappy customers are your greatest source of learning.", author: "Bill Gates" },
+      { quote: "The goal as a company is to have customer service that is not just the best, but legendary.", author: "Sam Walton" },
+      { quote: "Customer service shouldn't just be a department — it should be the entire company.", author: "Tony Hsieh" },
+      { quote: "Make every interaction count, even the small ones. They are all relevant.", author: "Shep Hyken" },
+      { quote: "A satisfied customer is the best business strategy of all.", author: "Michael LeBoeuf" },
+      { quote: "The customer's perception is your reality.", author: "Kate Zabriskie" },
+      { quote: "You don't earn loyalty in a day. You earn loyalty day-by-day.", author: "Jeffrey Gitomer" },
+      { quote: "Do what you do so well that they will want to see it again and bring their friends.", author: "Walt Disney" },
+      { quote: "There is only one boss — the customer. And they can fire everybody by spending their money elsewhere.", author: "Sam Walton" },
+      { quote: "Kind words can be short and easy to speak, but their echoes are truly endless.", author: "Mother Teresa" },
+      { quote: "One customer well taken care of could be more valuable than $10,000 worth of advertising.", author: "Jim Rohn" },
+      { quote: "Treat every customer as if they sign your paycheck — because they do.", author: "Ivan Misner" },
+      { quote: "The best customer service is when the customer doesn't need to call you.", author: "Jeff Bezos" },
+      { quote: "People will forget what you said, but they'll never forget how you made them feel.", author: "Maya Angelou" },
+      { quote: "We see our customers as invited guests to a party, and we are the hosts.", author: "Jeff Bezos" },
+      { quote: "Customers don't expect you to be perfect. They expect you to fix things when they go wrong.", author: "Donald Porter" },
+      { quote: "Always keep in mind the old retail adage: customers remember the service a lot longer than they remember the price.", author: "Lauren Freedman" },
+      { quote: "If you work just for money, you'll never make it. But if you love what you're doing, success will be yours.", author: "Ray Kroc" },
+      { quote: "Earn your success based on service to others, not at the expense of others.", author: "H. Jackson Brown Jr." },
+      { quote: "The key is to set realistic customer expectations, and then not just meet them — exceed them.", author: "Richard Branson" },
+      { quote: "Customers who love you will market for you more powerfully than you can market yourself.", author: "Derek Sivers" },
+      { quote: "Go beyond merely communicating — touch the heart of your customer.", author: "Jerry Porras" },
+      { quote: "Solving problems for real people makes your work matter. Every interaction is a chance to do that.", author: "Unknown" },
+      { quote: "The best way to find yourself is to lose yourself in the service of others.", author: "Mahatma Gandhi" },
+      { quote: "Service is the rent we pay for being alive.", author: "Marian Wright Edelman" },
+      { quote: "Take care of your customers or someone else will.", author: "Unknown" },
+      { quote: "Excellent service is the key that unlocks loyalty, and loyalty is the foundation of long-term success.", author: "Unknown" },
+      { quote: "Being on par in terms of price and quality only gets you into the game — service wins the game.", author: "Tony Alessandra" },
+      { quote: "Quality is never an accident; it is always the result of intelligent effort.", author: "John Ruskin" },
+      { quote: "To earn the respect of others, we must first show them we respect ourselves.", author: "Ralph Waldo Emerson" },
+      { quote: "Patience and empathy are the twin engines of great customer care.", author: "Unknown" },
+      { quote: "Each person who walks away helped is a story worth telling.", author: "Unknown" },
+      { quote: "Small acts of kindness, repeated daily, build extraordinary customer relationships.", author: "Unknown" },
+      { quote: "Good service is good business.", author: "Siebel Ad" },
+      { quote: "A great attitude is the foundation of great service — and great service is the foundation of everything else.", author: "Unknown" },
+      { quote: "Every interaction is an opportunity to show up with your best, most human self.", author: "Unknown" },
+    ];
+
+    function getDailyQuote() {
+      const day = new Date();
+      const idx = (day.getFullYear() * 366 + day.getMonth() * 31 + day.getDate()) % DAILY_QUOTES.length;
+      return DAILY_QUOTES[idx];
+    }
+
+    const DEFAULT_BLOCKS = [
+      { id: 1000, task: "Setup + Triage",                start: "08:31", end: "08:45", category: "admin",    color: "purple" },
+      { id: 1001, task: "Comment Resolution Block #1",   start: "08:45", end: "10:45", category: "comments", color: "cyan"   },
+      { id: 1002, task: "Quick Reset",                   start: "10:45", end: "11:00", category: "break",    color: "orange" },
+      { id: 1003, task: "Senior Agent Tasks (Block 1)",  start: "11:00", end: "12:00", category: "admin",    color: "purple" },
+      { id: 1004, task: "Lunch Break",                   start: "12:00", end: "12:30", category: "break",    color: "orange" },
+      { id: 1005, task: "Comment Resolution Block #2",   start: "12:30", end: "14:00", category: "comments", color: "cyan"   },
+      { id: 1006, task: "Responses Block",               start: "14:00", end: "14:45", category: "other",    color: "pink"   },
+      { id: 1007, task: "Senior Agent Tasks (Block 2)",  start: "14:45", end: "15:45", category: "admin",    color: "purple" },
+      { id: 1008, task: "Buffer / Overflow",             start: "15:45", end: "16:15", category: "admin",    color: "yellow" },
+      { id: 1009, task: "Wrap-Up",                       start: "16:15", end: "16:31", category: "admin",    color: "purple" },
+    ];
+
+    const CATEGORY_LABELS = {
+      comments: "Comment Mod",
+      admin: "Admin", break: "Break", other: "Other",
+    };
+
+    function timeToMins(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+    function minsToTime(m) {
+      return `${Math.floor(m/60).toString().padStart(2,"0")}:${(m%60).toString().padStart(2,"0")}`;
+    }
+    function duration(s, e) {
+      let diff = timeToMins(e) - timeToMins(s);
+      if (diff < 0) diff += 1440; // handle overnight
+      return diff;
+    }
+    function fmt12(t) {
+      const [h, m] = t.split(":").map(Number);
+      const p = h >= 12 ? "PM" : "AM", hr = h % 12 === 0 ? 12 : h % 12;
+      return `${hr}:${m.toString().padStart(2,"0")} ${p}`;
+    }
+    function fmtDur(mins) {
+      if (!mins || mins <= 0) return '0m';
+      const h = Math.floor(mins / 60), m = mins % 60;
+      if (h === 0) return `${m}m`;
+      if (m === 0) return `${h}h`;
+      return `${h}h ${m}m`;
+    }
+    function parseFlexTime(str) {
+      str = str.trim().toLowerCase().replace(/\s+/g,"");
+      const ampm = str.includes("am") ? "am" : str.includes("pm") ? "pm" : null;
+      const clean = str.replace("am","").replace("pm","");
+      let h, m = 0;
+      if (clean.includes(":")) [h, m] = clean.split(":").map(Number);
+      else h = parseInt(clean);
+      if (isNaN(h)) return null;
+      if (ampm === "pm" && h !== 12) h += 12;
+      if (ampm === "am" && h === 12) h = 0;
+      if (h < 0 || h > 23) return null;
+      return `${h.toString().padStart(2,"0")}:${(m||0).toString().padStart(2,"0")}`;
+    }
+    function parseDaySchedule(text) {
+      const parts = text.split(/[-–]|to/i).map(s => s.trim());
+      if (parts.length < 2) return null;
+      const start = parseFlexTime(parts[0]), end = parseFlexTime(parts[1]);
+      if (!start || !end) return null;
+      return { start, end };
+    }
+    function rescaleBlocks(blocks, ns, ne) {
+      // Sort blocks by start time first
+      const sorted = [...blocks].sort((a, b) => timeToMins(a.start) - timeToMins(b.start));
+
+      let nS = timeToMins(ns), nE = timeToMins(ne);
+      if (nE <= nS) nE += 1440; // handle overnight
+      const nD = nE - nS;
+      if (nD <= 0 || sorted.length === 0) return blocks;
+
+      // Get original span
+      let oS = timeToMins(sorted[0].start);
+      let oE = timeToMins(sorted[sorted.length - 1].end);
+      if (oE <= oS) oE += 1440; // handle overnight original
+      const oD = oE - oS;
+
+      // If all blocks are the same time, distribute evenly
+      if (oD === 0) {
+        const each = Math.floor(nD / sorted.length);
+        return sorted.map((b, i) => ({
+          ...b,
+          start: minsToTime((nS + i * each) % 1440),
+          end:   minsToTime((nS + (i + 1) * each) % 1440)
+        }));
+      }
+
+      // Scale each block proportionally into the new window
+      // Then do a final pack pass to fix any rounding gaps/overlaps
+      const scaled = sorted.map(b => {
+        let bS = timeToMins(b.start);
+        let bE = timeToMins(b.end);
+        if (bS < oS) bS += 1440;
+        if (bE < bS) bE += 1440;
+        const newS = Math.round((nS + ((bS - oS) / oD) * nD) / 5) * 5;
+        const newE = Math.round((nS + ((bE - oS) / oD) * nD) / 5) * 5;
+        // Ensure minimum 5 min duration
+        const clampedS = Math.max(nS, Math.min(nE - 5, newS));
+        const clampedE = Math.max(clampedS + 5, Math.min(nE, newE));
+        return { ...b, _s: clampedS, _e: clampedE };
+      });
+
+      // Pack pass: if any block is shorter than 5 mins or overlaps next, fix it
+      // Work forward, snapping each block to end of previous
+      for (let i = 1; i < scaled.length; i++) {
+        if (scaled[i]._s < scaled[i-1]._e) {
+          const dur = scaled[i]._e - scaled[i]._s;
+          scaled[i]._s = scaled[i-1]._e;
+          scaled[i]._e = scaled[i]._s + Math.max(5, dur);
+        }
+      }
+
+      // If last block overflows nE, compress from the back
+      for (let i = scaled.length - 1; i >= 0; i--) {
+        if (scaled[i]._e > nE) {
+          scaled[i]._e = nE;
+          scaled[i]._s = Math.min(scaled[i]._s, nE - 5);
+        }
+        if (i > 0 && scaled[i]._s < scaled[i-1]._e) {
+          scaled[i-1]._e = scaled[i]._s;
+        }
+      }
+
+      return scaled.map(b => {
+        const result = { ...b, start: minsToTime(b._s % 1440), end: minsToTime(b._e % 1440) };
+        delete result._s; delete result._e;
+        return result;
+      });
+    }
+
+    function App() {
+      const [blocks,      setBlocks]      = useState(DEFAULT_BLOCKS);
+      const [metrics,     setMetrics]     = useState({ resolved:247, responses:28, resolvedGoal:500, responseGoal:50 });
+      const [editingId,   setEditingId]   = useState(null);
+      const [editForm,    setEditForm]    = useState({});
+      const [showAdd,     setShowAdd]     = useState(false);
+      const [addMode,     setAddMode]     = useState("choice"); // "choice" | "comment" | "custom"
+      const [newTask,     setNewTask]     = useState({ task:"", start:"", end:"", category:"other", color:"green" });
+      const [cmStart,     setCmStart]     = useState("");
+      const [cmEnd,       setCmEnd]       = useState("");
+
+      const addCommentBlock = () => {
+        if (!cmStart || !cmEnd) return;
+        const nb = { task:"Comment Moderation", start:cmStart, end:cmEnd, category:"comments", color:"cyan", id:Date.now() };
+        setBlocks([...blocks, nb].sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setCmStart(""); setCmEnd("");
+        setShowAdd(false); setAddMode("choice");
+      };
+      const [activeTab,   setActiveTab]   = useState("schedule");
+      const [aiLoading,   setAiLoading]   = useState(false);
+      const [aiSugg,      setAiSugg]      = useState(null);
+      const [aiInput,     setAiInput]     = useState("");
+      const [aiMode,      setAiMode]      = useState("single");
+      const [buildInput,  setBuildInput]  = useState("");
+      const [buildPlan,   setBuildPlan]   = useState(null);
+      const [buildLoading,setBuildLoading]= useState(false);
+
+      const [schedErr,    setSchedErr]    = useState(null);
+      const [shiftStart,  setShiftStart]  = useState("08:30");
+      const [shiftEnd,    setShiftEnd]    = useState("16:30");
+      // dayStart/dayEnd always mirror shiftStart/shiftEnd — kept for compatibility
+      const [dayStart,    setDayStart]    = useState("08:30");
+      const [dayEnd,      setDayEnd]      = useState("16:30");
+
+      // ── Hootsuite sync state ──
+      const lsGet = k => { try { return localStorage.getItem(k)||''; } catch(e){ return ''; } };
+      const lsSet = (k,v) => { try { localStorage.setItem(k,v); } catch(e){} };
+
+
+      // ── Live clock ──
+      const TIMEZONES = [
+        { label:"🌅 Eastern (ET)",        tz:"America/New_York"      },
+        { label:"🌾 Central (CT)",         tz:"America/Chicago"       },
+        { label:"🏔 Mountain (MT)",        tz:"America/Denver"        },
+        { label:"🌊 Pacific (PT)",         tz:"America/Los_Angeles"   },
+        { label:"🐻 Alaska (AKT)",         tz:"America/Anchorage"     },
+        { label:"🌺 Hawaii (HST)",         tz:"Pacific/Honolulu"      },
+        { label:"🗽 Atlantic (AT)",        tz:"America/Halifax"       },
+        { label:"🗼 London (GMT/BST)",     tz:"Europe/London"         },
+        { label:"🥐 Paris (CET)",          tz:"Europe/Paris"          },
+        { label:"🌏 Tokyo (JST)",          tz:"Asia/Tokyo"            },
+        { label:"🦘 Sydney (AEDT)",        tz:"Australia/Sydney"      },
+      ];
+      const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const [clockTz,  setClockTzRaw] = useState(() => lsGet('clock_tz') || localTz);
+      const [liveTime, setLiveTime]   = useState(new Date());
+      const saveClockTz = v => { setClockTzRaw(v); lsSet('clock_tz', v); };
+      const [notifPerm,   setNotifPerm]   = useState(() => {
+        try { return Notification.permission; } catch(e) { return 'unsupported'; }
+      });
+      const [lastNotifId, setLastNotifId] = useState(null); // track which block we last notified
+
+      useEffect(() => {
+        const id = setInterval(() => setLiveTime(new Date()), 1000);
+        return () => clearInterval(id);
+      }, []);
+
+      // ── Notification trigger: fires when active block changes ──
+      useEffect(() => {
+        if (notifPerm !== 'granted') return;
+        if (!activeBlock) return;
+        if (activeBlock.id === lastNotifId) return;
+        setLastNotifId(activeBlock.id);
+        try {
+          const minsLeft = minsLeftInBlock(activeBlock);
+          const body = `${fmt12(activeBlock.start)} – ${fmt12(activeBlock.end)} · ${minsLeft}m remaining`;
+          const n = new Notification(`🤠 Trail Stop: ${activeBlock.task}`, {
+            body,
+            icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">🤠</text></svg>',
+            badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">🤠</text></svg>',
+            tag: 'task-ranch-block',
+            requireInteraction: false,
+          });
+          setTimeout(() => n.close(), 8000);
+        } catch(e) { /* notification failed silently */ }
+      }, [activeBlock?.id, notifPerm]);
+
+      // ── 5-min warning notification ──
+      useEffect(() => {
+        if (notifPerm !== 'granted') return;
+        if (!activeBlock) return;
+        const mLeft = minsLeftInBlock(activeBlock);
+        if (mLeft !== 5) return;
+        try {
+          const n = new Notification(`⏰ 5 min left: ${activeBlock.task}`, {
+            body: `Wrapping up at ${fmt12(activeBlock.end)}`,
+            tag: 'task-ranch-warning',
+            requireInteraction: false,
+          });
+          setTimeout(() => n.close(), 6000);
+        } catch(e) {}
+      }, [nowInTz, notifPerm]);
+
+      const fmtClock = (date, tz) => date.toLocaleTimeString('en-US', {
+        timeZone: tz, hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+      });
+      const fmtDate = (date, tz) => date.toLocaleDateString('en-US', {
+        timeZone: tz, weekday:'long', month:'long', day:'numeric'
+      });
+      const tzLabel = TIMEZONES.find(t=>t.tz===clockTz)?.label || clockTz;
+
+      const rGoal = metrics.resolvedGoal, rsGoal = metrics.responseGoal;
+      const rPct  = Math.min(100, Math.round((metrics.resolved  / Math.max(1,rGoal))  * 100));
+      const rsPct = Math.min(100, Math.round((metrics.responses / Math.max(1,rsGoal)) * 100));
+      const rRate = metrics.resolved > 0 ? ((metrics.responses/metrics.resolved)*100).toFixed(1) : "0.0";
+
+      // ── Current time awareness (uses live clock + selected timezone) ──
+      const nowInTz = (() => {
+        const parts = liveTime.toLocaleString('en-US', { timeZone: clockTz, hour:'2-digit', minute:'2-digit', hour12:false }).split(':');
+        const h = parseInt(parts[0]), m = parseInt(parts[1]);
+        return h * 60 + (isNaN(m) ? 0 : m);
+      })();
+      const getBlockStatus = (block) => {
+        const bS = timeToMins(block.start), bE = timeToMins(block.end);
+        if (nowInTz < bS) return 'upcoming';
+        if (nowInTz >= bE) return 'done';
+        return 'active';
+      };
+      const activeBlock = blocks.find(b => getBlockStatus(b) === 'active') || null;
+      const blockProgress = (block) => {
+        const bS = timeToMins(block.start), bE = timeToMins(block.end);
+        const dur = bE - bS;
+        if (dur <= 0) return 0;
+        return Math.min(100, Math.max(0, Math.round(((nowInTz - bS) / dur) * 100)));
+      };
+      const minsLeftInBlock = (block) => Math.max(0, timeToMins(block.end) - nowInTz);
+
+      const totalWork    = blocks.filter(b=>b.category!=="break").reduce((s,b)=>s+duration(b.start,b.end),0);
+      // Shift total duration for reference
+      const shiftTotal   = (() => { let s=timeToMins(dayStart), e=timeToMins(dayEnd); if(e<=s) e+=1440; return e-s; })();
+      const commentMins  = blocks.filter(b=>b.category==="comments").reduce((s,b)=>s+duration(b.start,b.end),0);
+      const remaining    = Math.max(0, rGoal - metrics.resolved);
+      const cBlocks      = blocks.filter(b=>b.category==="comments");
+      const totalCMins   = cBlocks.reduce((s,b)=>s+duration(b.start,b.end),0);
+      const cQuotas = cBlocks.reduce((acc,b)=>{
+        acc[b.id] = Math.round(metrics.resolvedGoal * (totalCMins>0 ? duration(b.start,b.end)/totalCMins : 0));
+        return acc;
+      },{});
+      // Fill blocks sequentially (earliest first) — you work through them in order,
+      // so Block #1 is credited as complete before Block #2 gets any "done" progress.
+      const cDone = (() => {
+        const result = {};
+        let pool = metrics.resolved;
+        const seq = [...cBlocks].sort((a,b) => timeToMins(a.start) - timeToMins(b.start));
+        seq.forEach(b => {
+          const q = cQuotas[b.id] || 0;
+          const d = Math.min(q, pool);
+          result[b.id] = d;
+          pool = Math.max(0, pool - d);
+        });
+        return result;
+      })();
+      const cTargets = cBlocks.reduce((acc,b)=>{
+        acc[b.id] = Math.max(0, (cQuotas[b.id]||0) - (cDone[b.id]||0));
+        return acc;
+      },{});
+      const cPerMin = totalCMins > 0 ? (remaining/totalCMins).toFixed(2) : 0;
+      const cCPH = cBlocks.reduce((acc,b)=>{
+        const hrs = duration(b.start,b.end) / 60;
+        acc[b.id] = hrs > 0 ? Math.round((cTargets[b.id]||0) / hrs) : 0;
+        return acc;
+      },{});
+      const overallCPH = totalCMins > 0 ? Math.round(remaining / (totalCMins/60)) : 0;
+
+      // ── Per-block RESPONSE breakdown ──
+      const targetReplyRate = metrics.resolvedGoal > 0 ? metrics.responseGoal / metrics.resolvedGoal : 0.1;
+      const cRespQuota = cBlocks.reduce((acc,b) => { acc[b.id] = Math.round((cQuotas[b.id]||0) * targetReplyRate); return acc;},{});
+      const cRespDone  = (() => { const r={}; let pool=metrics.responses; const seq=[...cBlocks].sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)); seq.forEach(b=>{ const q=cRespQuota[b.id]||0; const d=Math.min(q,pool); r[b.id]=d; pool=Math.max(0,pool-d); }); return r; })();
+      const cRespLeft  = cBlocks.reduce((acc,b) => { acc[b.id] = Math.max(0, (cRespQuota[b.id]||0) - (cRespDone[b.id]||0)); return acc;},{});
+      const cNoResp    = cBlocks.reduce((acc,b) => { acc[b.id] = Math.max(0, (cTargets[b.id]||0) - (cRespLeft[b.id]||0)); return acc;},{});
+
+      const C = k => COLORS[k] || COLORS.cyan;
+      const acc = c => ({ color: C(c), fontWeight:"700" });
+      const card = c => ({ border:`2px solid ${C(c)}`, boxShadow:`2px 2px 0 ${C(c)}44, 4px 4px 12px rgba(90,40,10,0.1)` });
+      const inp = (extra={}) => ({
+        background:"#FFF8EE", border:"1.5px solid #C4A47A", color:"#3D1C08",
+        padding:"8px 10px", borderRadius:8, fontSize:15, outline:"none",
+        fontFamily:"Georgia,serif", width:"100%", boxSizing:"border-box", ...extra
+      });
+      const btn = (c="cyan",extra={}) => ({
+        background: C(c)+"18", border:`1.5px solid ${C(c)}`, color:C(c),
+        padding:"8px 16px", borderRadius:20, fontSize:13, cursor:"pointer",
+        fontFamily:"Georgia,serif", fontWeight:"700", letterSpacing:0.5,
+        WebkitTapHighlightColor:"transparent", ...extra
+      });
+
+      const startEdit = b => { setEditingId(b.id); setEditForm({...b}); };
+      const saveEdit  = () => {
+        const orig = blocks.find(b=>b.id===editingId);
+        const delta = timeToMins(editForm.end) - timeToMins(orig.end);
+        setBlocks(blocks.map(b => {
+          if (b.id === editingId) return {...editForm};
+          if (timeToMins(b.start) >= timeToMins(orig.end))
+            return {...b, start:minsToTime(Math.max(0,timeToMins(b.start)+delta)), end:minsToTime(Math.min(1439,timeToMins(b.end)+delta))};
+          return b;
+        }).sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setEditingId(null);
+      };
+      const delBlock = id => setBlocks(blocks.filter(b=>b.id!==id));
+      const addBlock = () => {
+        if (!newTask.task||!newTask.start||!newTask.end) return;
+        setBlocks([...blocks,{...newTask,id:Date.now()}].sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setNewTask({task:"",start:"",end:"",category:"other",color:"green"});
+        setShowAdd(false);
+      };
+      const applySchedule = (ns, ne) => {
+        const startVal = ns !== undefined ? ns : shiftStart;
+        const endVal   = ne !== undefined ? ne : shiftEnd;
+        const rescaled = rescaleBlocks(blocks, startVal, endVal);
+        let nS = timeToMins(startVal), nE = timeToMins(endVal);
+        if (nE <= nS) nE += 1440;
+        const safed = rescaled.map(b => {
+          let bS = timeToMins(b.start), bE = timeToMins(b.end);
+          if (bS < nS) bS += 1440;
+          if (bE < bS) bE += 1440;
+          bS = Math.max(nS, Math.min(nE - 5, bS));
+          bE = Math.max(bS + 5, Math.min(nE, bE));
+          return { ...b, start: minsToTime(bS % 1440), end: minsToTime(bE % 1440) };
+        });
+        // Keep dayStart/dayEnd in sync so all tabs use correct boundaries
+        setDayStart(startVal);
+        setDayEnd(endVal);
+        setShiftStart(startVal);
+        setShiftEnd(endVal);
+        setBlocks(safed);
+        setSchedErr(null);
+      };
+
+      // Time slots from 6:00 AM to 12:00 AM (midnight) in 30-min increments
+      const SHIFT_TIMES = [
+        "06:00","06:30","07:00","07:30","08:00","08:30","09:00","09:30",
+        "10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30",
+        "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30",
+        "18:00","18:30","19:00","19:30","20:00","20:30","21:00","21:30",
+        "22:00","22:30","23:00","23:30","00:00"
+      ];
+      const SHIFT_LABELS = {
+        "06:00":"6:00 AM","06:30":"6:30 AM","07:00":"7:00 AM","07:30":"7:30 AM",
+        "08:00":"8:00 AM","08:30":"8:30 AM","09:00":"9:00 AM","09:30":"9:30 AM",
+        "10:00":"10:00 AM","10:30":"10:30 AM","11:00":"11:00 AM","11:30":"11:30 AM",
+        "12:00":"12:00 PM","12:30":"12:30 PM","13:00":"1:00 PM","13:30":"1:30 PM",
+        "14:00":"2:00 PM","14:30":"2:30 PM","15:00":"3:00 PM","15:30":"3:30 PM",
+        "16:00":"4:00 PM","16:30":"4:30 PM","17:00":"5:00 PM","17:30":"5:30 PM",
+        "18:00":"6:00 PM","18:30":"6:30 PM","19:00":"7:00 PM","19:30":"7:30 PM",
+        "20:00":"8:00 PM","20:30":"8:30 PM","21:00":"9:00 PM","21:30":"9:30 PM",
+        "22:00":"10:00 PM","22:30":"10:30 PM","23:00":"11:00 PM","23:30":"11:30 PM",
+        "00:00":"12:00 AM"
+      };
+
+      const askAI = () => {
+        if (!aiInput.trim()) return;
+        setAiLoading(true); setAiSugg(null);
+
+        setTimeout(() => {
+          try {
+            const input = aiInput.trim().toLowerCase();
+
+            // ── 1. Estimate duration ──
+            let estMins = 30;
+            const mMatch = input.match(/(\d+)\s*min/);
+            const hMatch = input.match(/(\d+(?:\.\d+)?)\s*hour/);
+            if (mMatch) estMins = Math.min(240, Math.max(5, parseInt(mMatch[1])));
+            else if (hMatch) estMins = Math.min(240, Math.round(parseFloat(hMatch[1]) * 60));
+            else if (/\b(quick|brief|fast)\b/.test(input)) estMins = 10;
+            else if (/\b15.?min\b/.test(input)) estMins = 15;
+            else if (/\b(half.?hour|30.?min|1:1|one.on.one|standup|stand.?up|sync)\b/.test(input)) estMins = 30;
+            else if (/\b(45.?min)\b/.test(input)) estMins = 45;
+            else if (/\b(hour|training|workshop|deep.?work|focus)\b/.test(input)) estMins = 60;
+            else if (/\b(90.?min|1.5.?hour)\b/.test(input)) estMins = 90;
+            else if (/\b(2.?hour)\b/.test(input)) estMins = 120;
+
+            // ── 2. Determine category & color ──
+            let category = 'other', color = 'green';
+            if (/\b(break|lunch|coffee|walk|rest|snack)\b/.test(input)) { category = 'break'; color = 'orange'; }
+            else if (/\b(reply|response|respond|write|draft|email|message)\b/.test(input)) { category = 'other'; color = 'pink'; }
+            else if (/\b(comment|mod|moderat|review|queue|batch)\b/.test(input)) { category = 'comments'; color = 'cyan'; }
+            else if (/\b(meeting|standup|1:1|one.on.one|sync|call|training|workshop|check.?in|admin|plan|prioriti)\b/.test(input)) { category = 'admin'; color = 'purple'; }
+            else if (/\b(test|qa|bot|tool|setup|config|report|analytic|data)\b/.test(input)) { category = 'other'; color = 'yellow'; }
+
+            // ── 3. Find free gaps ──
+            const sorted = [...blocks].sort((a,b) => timeToMins(a.start) - timeToMins(b.start));
+            const getGaps = (blks) => {
+              const dS = timeToMins(dayStart), dE = timeToMins(dayEnd);
+              // Only consider blocks that fall within the work day
+              const s = [...blks]
+                .filter(b => timeToMins(b.end) > dS && timeToMins(b.start) < dE)
+                .sort((a,b) => timeToMins(a.start) - timeToMins(b.start));
+              const gaps = [];
+              const effStart = s.length > 0 ? Math.max(dS, timeToMins(s[0].start)) : dS;
+              if (effStart > dS)
+                gaps.push({ start: dayStart, end: minsToTime(effStart), mins: effStart - dS, position: 'start', prevCat: null, nextCat: s[0]?.category, idx: -1 });
+              for (let i = 0; i < s.length - 1; i++) {
+                const gS = timeToMins(s[i].end), gE = Math.min(timeToMins(s[i+1].start), dE), gM = gE - gS;
+                if (gM > 0 && gS < dE) gaps.push({ start: minsToTime(gS), end: minsToTime(gE), mins: gM, position: 'middle', prevCat: s[i].category, nextCat: s[i+1].category, idx: i });
+              }
+              const lastEnd = s.length > 0 ? timeToMins(s[s.length-1].end) : dS;
+              if (lastEnd < dE)
+                gaps.push({ start: minsToTime(lastEnd), end: dayEnd, mins: dE - lastEnd, position: 'end', prevCat: s[s.length-1]?.category, nextCat: null, idx: s.length-1 });
+              if (s.length === 0)
+                gaps.push({ start: dayStart, end: dayEnd, mins: dE - dS, position: 'start', prevCat: null, nextCat: null, idx: -1 });
+              return gaps;
+            };
+
+            const scoreGap = (g) => {
+              let score = 0;
+              const waste = g.mins - estMins;
+              score -= waste * 0.3;
+              if (category === 'admin' || category === 'other') {
+                if (g.prevCat === 'comments' && g.nextCat === 'comments') score += 50;
+                else if (g.prevCat === 'comments' || g.nextCat === 'comments') score += 20;
+              }
+              if (category === 'break') {
+                const mid = timeToMins(g.start) + g.mins / 2;
+                score -= Math.abs(mid - 12*60) * 0.1;
+              }
+              if (category === 'comments' && (g.position === 'start' || g.position === 'end')) score += 15;
+              if (g.prevCat !== 'comments' && g.nextCat !== 'comments') score += 10;
+              score -= timeToMins(g.start) * 0.01;
+              return score;
+            };
+
+            // ── 4. Try natural fit first — only gaps within dayStart–dayEnd ──
+            const allGaps = getGaps(sorted);
+            // Filter: gap must be within work hours AND task must end by dayEnd
+            const naturalGaps = allGaps.filter(g => {
+              const gStart = timeToMins(g.start);
+              const gEnd   = timeToMins(g.end);
+              const dStart = timeToMins(dayStart);
+              const dEnd   = timeToMins(dayEnd);
+              // Gap must start at or after dayStart, task must fit before dayEnd
+              return gStart >= dStart && gStart + estMins <= dEnd && g.mins >= estMins;
+            });
+            if (naturalGaps.length > 0) {
+              const best = naturalGaps.reduce((a,b) => scoreGap(a) >= scoreGap(b) ? a : b);
+              const taskStart = best.start;
+              // Clamp end to dayEnd
+              const rawEnd = timeToMins(best.start) + estMins;
+              const taskEnd = minsToTime(Math.min(rawEnd, timeToMins(dayEnd)));
+              let reason = '';
+              if (best.prevCat === 'comments' && best.nextCat === 'comments')
+                reason = `Fits naturally in the ${best.mins}-min gap between two comment batches — zero disruption to your wrangling flow.`;
+              else if (best.position === 'start')
+                reason = `Placed at the start of your day before your first block — schedule untouched.`;
+              else if (best.position === 'end')
+                reason = `Placed at the end of your day — no blocks were moved.`;
+              else
+                reason = `Found a natural ${best.mins}-min gap — no blocks need to be adjusted.`;
+              setAiSugg({ task: aiInput.trim(), start: taskStart, end: taskEnd, category, color, reason, adjustedBlocks: null });
+              setAiLoading(false);
+              return;
+            }
+
+            // ── 5. No natural gap — compress & shift blocks to fit within shift ──
+            const dEndMins   = timeToMins(dayEnd);
+            const dStartMins = timeToMins(dayStart);
+            const shiftMins  = dEndMins - dStartMins;
+            const MIN_BLOCK  = 5;
+
+            // Hard clamp helper — force a value between shift boundaries
+            const clamp = (v) => Math.max(dStartMins, Math.min(dEndMins, v));
+
+            // Check there's physically enough shift time
+            if (shiftMins < estMins + sorted.length * MIN_BLOCK) {
+              setAiSugg({ error: `Your ${fmt12(dayStart)}–${fmt12(dayEnd)} shift (${shiftMins} min) is too short to fit a ${estMins}-minute task alongside ${sorted.length} existing blocks.` });
+              setAiLoading(false);
+              return;
+            }
+
+            // Core function: place task at insertAtMins, pack remaining blocks
+            // into the remaining time, compress proportionally if needed.
+            const tryInsert = (insertAtMins) => {
+              // Hard clamp: task must start and end within shift
+              const tS = clamp(insertAtMins);
+              const tE = clamp(tS + estMins);
+              if (tE - tS < estMins) return null; // task doesn't fully fit
+
+              // Split blocks into "before task" and "after task"
+              const before = sorted.filter(b => timeToMins(b.end) <= tS);
+              const after  = sorted.filter(b => timeToMins(b.start) >= tE);
+              const overlapping = sorted.filter(b =>
+                timeToMins(b.start) < tE && timeToMins(b.end) > tS
+              );
+              // Treat overlapping blocks as "after" (they get pushed)
+              const afterAll = [...overlapping, ...after].sort((a,b) => timeToMins(a.start)-timeToMins(b.start));
+
+              // Time available after the task ends
+              const afterAvail = dEndMins - tE;
+              const afterNeed  = afterAll.reduce((s,b) => s + duration(b.start, b.end), 0);
+
+              // If not enough room after task, fail this insertion point
+              if (afterNeed > afterAvail && afterAll.length > 0) {
+                // Try to compress — each block gets proportional share of afterAvail
+                if (afterAvail < afterAll.length * MIN_BLOCK) return null;
+              }
+
+              // Pack "before" blocks — keep them as-is since they're before the task
+              const wBefore = before.map(b => ({ ...b }));
+
+              // Pack "after" blocks into [tE, dEndMins], compressing proportionally
+              let wAfter = [];
+              if (afterAll.length > 0) {
+                const scale = afterAvail / Math.max(afterNeed, 1);
+                let cursor = tE;
+                wAfter = afterAll.map(b => {
+                  const origDur = duration(b.start, b.end);
+                  const newDur  = Math.max(MIN_BLOCK, Math.min(origDur, Math.floor(origDur * Math.min(scale, 1))));
+                  const newStart = cursor;
+                  const newEnd   = clamp(cursor + newDur);
+                  cursor = newEnd;
+                  return { ...b, start: minsToTime(newStart), end: minsToTime(newEnd) };
+                });
+              }
+
+              // Final hard clamp pass — guarantee nothing escapes shift boundaries
+              const allW = [
+                ...wBefore.map(b => ({ ...b, start: minsToTime(clamp(timeToMins(b.start))), end: minsToTime(clamp(timeToMins(b.end))) })),
+                ...wAfter.map(b => ({ ...b, start: minsToTime(clamp(timeToMins(b.start))), end: minsToTime(clamp(timeToMins(b.end))) })),
+              ];
+
+              // Verify no block is outside shift
+              if (allW.some(b => timeToMins(b.start) < dStartMins || timeToMins(b.end) > dEndMins)) return null;
+              // Verify no zero-duration blocks
+              if (allW.some(b => timeToMins(b.end) - timeToMins(b.start) < MIN_BLOCK)) return null;
+
+              // Compute what changed
+              const changes = [];
+              sorted.forEach(orig => {
+                const updated = allW.find(b => b.id === orig.id);
+                if (updated && (updated.start !== orig.start || updated.end !== orig.end)) {
+                  changes.push({ name: orig.task, from: `${fmt12(orig.start)}–${fmt12(orig.end)}`, to: `${fmt12(updated.start)}–${fmt12(updated.end)}`, category: orig.category });
+                }
+              });
+
+              const commentChanges = changes.filter(c => c.category === 'comments').length;
+              const score = -commentChanges * 100 - changes.length * 10 - tS * 0.001;
+              return { tS, tE, finalBlocks: allW, changes, score, commentChanges };
+            };
+
+            // Try all candidate insertion points — between/before/after existing blocks
+            const candidates = [
+              dStartMins,
+              ...sorted.map(b => timeToMins(b.end)),
+              ...sorted.map(b => timeToMins(b.start)),
+              dEndMins - estMins, // right before end of shift
+            ].filter(c => c >= dStartMins && c + estMins <= dEndMins)
+             .sort((a, b) => a - b);
+
+            let bestPlan = null;
+            for (const c of candidates) {
+              const plan = tryInsert(c);
+              if (plan && (!bestPlan || plan.score > bestPlan.score)) bestPlan = plan;
+            }
+
+            if (!bestPlan) {
+              setAiSugg({ error: `Couldn't fit a ${estMins}-minute task within your ${fmt12(dayStart)}–${fmt12(dayEnd)} shift without making blocks too short. Try a shorter duration.` });
+              setAiLoading(false);
+              return;
+            }
+
+            // Hard clamp the final task times one more time
+            const taskStart = minsToTime(clamp(bestPlan.tS));
+            const taskEnd   = minsToTime(clamp(bestPlan.tE));
+            const commentChanges = bestPlan.commentChanges || 0;
+            const reason = bestPlan.changes.length === 0
+              ? `Placed within your shift — no blocks needed adjusting.`
+              : `${bestPlan.changes.length} block${bestPlan.changes.length>1?'s':''} adjusted to fit within your ${fmt12(dayStart)}–${fmt12(dayEnd)} shift.${commentChanges > 0 ? ` ${commentChanges} comment batch${commentChanges>1?'es':''} shortened.` : ' Comment batches preserved.'}`;
+
+            setAiSugg({
+              task: aiInput.trim(), start: taskStart, end: taskEnd, category, color,
+              reason, adjustedBlocks: bestPlan.finalBlocks, changes: bestPlan.changes
+            });
+          } catch(e) {
+            setAiSugg({ error: `Couldn't find a slot: ${e.message}` });
+          }
+          setAiLoading(false);
+        }, 600);
+      };
+      const acceptSugg = () => {
+        if (!aiSugg||aiSugg.error) return;
+        const nb = { task: aiSugg.task, start: aiSugg.start, end: aiSugg.end, category: aiSugg.category, color: aiSugg.color, id: Date.now() };
+        let newBlocks = aiSugg.adjustedBlocks
+          ? [...aiSugg.adjustedBlocks, nb]
+          : [...blocks, nb];
+        setBlocks(newBlocks.sort((a,b)=>timeToMins(a.start)-timeToMins(b.start)));
+        setAiSugg(null); setAiInput(""); setActiveTab("schedule");
+      };
+
+
+
+
+      // ── Build My Day ──
+      const buildMyDay = () => {
+        if (!buildInput.trim()) return;
+        setBuildLoading(true); setBuildPlan(null);
+        setTimeout(() => {
+          try {
+            const lines = buildInput.trim().split('\n').map(l=>l.trim()).filter(Boolean);
+            const tasks = [];
+            for (const line of lines) {
+              if (!line) continue;
+              let estMins = 30;
+              const mMatch = line.match(/(\d+)\s*min/i);
+              const hMatch = line.match(/(\d+(?:\.\d+)?)\s*h(?:our|r)?/i);
+              if (mMatch) estMins = Math.min(480, Math.max(5, parseInt(mMatch[1])));
+              else if (hMatch) estMins = Math.min(480, Math.round(parseFloat(hMatch[1])*60));
+              else if (/\bquick\b|\bbrief\b/i.test(line)) estMins = 10;
+              else if (/\bstandup\b|\bstand.?up\b|\bsync\b|\b1:1\b/i.test(line)) estMins = 30;
+              else if (/\bhour\b|\bdeep.?work\b|\bfocus\b/i.test(line)) estMins = 60;
+              let category = "other", color = "green";
+              const tl = line.toLowerCase();
+              if (/break|lunch|coffee|walk|rest|snack|reset|stretch/.test(tl)) { category="break"; color="orange"; }
+              else if (/comment|mod|moderat|resolv|queue|batch/.test(tl)) { category="comments"; color="cyan"; }
+              else if (/reply|response|respond|draft|email/.test(tl)) { category="other"; color="pink"; }
+              else if (/meet|standup|1:1|sync|call|train|admin|plan|prioriti|triage|setup|wrap|eod|prep|log|senior|license|filmmaker|help.?center|bot|test|buffer|overflow/.test(tl)) { category="admin"; color="purple"; }
+              else if (/report|analytic|data|metric/.test(tl)) { category="other"; color="yellow"; }
+              const name = line.replace(/\(.*?\)/g,"").replace(/\b\d+\s*min\b/gi,"").replace(/\b\d+(?:\.\d+)?\s*h(?:our|r)?\b/gi,"").replace(/^\s*[-\u2013\u2022*]\s*/,"").trim() || line.trim();
+              tasks.push({ name, estMins, category, color });
+            }
+            if (tasks.length === 0) { setBuildPlan({ error: "Couldn\'t parse any tasks from that list." }); setBuildLoading(false); return; }
+            const dS = timeToMins(dayStart), dE = timeToMins(dayEnd);
+            const totalMins = tasks.reduce((s,t)=>s+t.estMins, 0);
+            if (totalMins > dE - dS) {
+              setBuildPlan({ error: `Your tasks total ${totalMins} min but your shift is only ${dE-dS} min. Try reducing durations or removing tasks.` });
+              setBuildLoading(false); return;
+            }
+            const scheduled = [];
+            let cursor = dS;
+            for (const task of tasks) {
+              const start = cursor;
+              const end   = Math.min(cursor + task.estMins, dE);
+              scheduled.push({ id: Date.now() + Math.random(), task: task.name, start: minsToTime(start), end: minsToTime(end), category: task.category, color: task.color, estMins: task.estMins, actualMins: end - start });
+              cursor = end;
+              if (cursor >= dE) break;
+            }
+            setBuildPlan({ blocks: scheduled, totalMins, shiftMins: dE - dS });
+          } catch(e) { setBuildPlan({ error: `Something went wrong: ${e.message}` }); }
+          setBuildLoading(false);
+        }, 500);
+      };
+
+      const acceptBuildPlan = () => {
+        if (!buildPlan || buildPlan.error) return;
+        const newBlocks = buildPlan.blocks.map(b => ({ id: Date.now() + Math.random(), task: b.task, start: b.start, end: b.end, category: b.category, color: b.color }));
+        setBlocks(newBlocks.sort((a,b2)=>timeToMins(a.start)-timeToMins(b2.start)));
+        setBuildPlan(null); setBuildInput(""); setActiveTab("schedule");
+      };
+
+      const TABS = [
+        ["schedule", "🌵", "Round-Up"],
+        ["metrics",  "📋", "The Tally"],
+        ["ai",       "🌟", "Trail Boss"],
+      ];
+
+      return (
+        <div style={{ background:"#F8F0E0", minHeight:"100vh", fontFamily:"Georgia,'Times New Roman',serif", color:"#3D1C08", position:"relative", overflowX:"hidden" }}>
+
+          {/* Cow print background */}
+          <svg style={{ position:"fixed", inset:0, width:"100%", height:"100%", pointerEvents:"none", zIndex:0, opacity:0.13 }} xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="cowprint" x="0" y="0" width="420" height="320" patternUnits="userSpaceOnUse">
+                <path d="M22,58 C10,36 26,12 54,16 C82,20 94,44 88,68 C82,92 58,100 36,90 C14,80 34,80 22,58 Z" fill="#3D1C08"/>
+                <path d="M148,18 C168,4 200,8 210,30 C220,52 205,72 182,74 C159,76 142,58 148,18 Z" fill="#3D1C08"/>
+                <path d="M318,24 C330,14 350,20 354,38 C358,56 342,68 326,62 C310,56 306,34 318,24 Z" fill="#3D1C08"/>
+                <path d="M8,148 C4,122 20,102 44,106 C68,110 76,134 70,158 C64,182 40,190 20,178 C0,166 12,174 8,148 Z" fill="#3D1C08"/>
+                <path d="M155,108 C148,82 168,64 196,70 C224,76 236,102 228,130 C220,158 194,168 170,158 C146,148 162,134 155,108 Z" fill="#3D1C08"/>
+                <path d="M330,100 C344,82 370,86 378,110 C386,134 368,154 346,150 C324,146 316,118 330,100 Z" fill="#3D1C08"/>
+                <path d="M14,228 C6,206 22,184 52,186 C82,188 96,214 86,240 C76,266 46,272 22,258 C-2,244 22,250 14,228 Z" fill="#3D1C08"/>
+                <path d="M112,250 C120,238 138,242 142,256 C146,270 134,280 120,276 C106,272 104,262 112,250 Z" fill="#3D1C08"/>
+                <path d="M196,234 C190,212 210,196 238,202 C266,208 274,232 262,254 C250,276 222,280 202,266 C182,252 202,256 196,234 Z" fill="#3D1C08"/>
+                <path d="M338,220 C350,202 376,206 382,228 C388,250 370,268 348,264 C326,260 326,238 338,220 Z" fill="#3D1C08"/>
+                <path d="M82,86 C88,78 100,82 102,92 C104,102 94,108 84,104 C74,100 76,94 82,86 Z" fill="#3D1C08"/>
+                <path d="M268,56 C274,48 286,52 288,62 C290,72 280,78 270,74 C260,70 262,64 268,56 Z" fill="#3D1C08"/>
+                <path d="M398,168 C404,158 416,162 418,174 C420,186 410,192 400,188 C390,184 392,178 398,168 Z" fill="#3D1C08"/>
+                <path d="M130,174 C136,166 148,170 150,182 C152,194 140,200 130,194 C120,188 124,182 130,174 Z" fill="#3D1C08"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#cowprint)"/>
+          </svg>
+
+          <div className="safe-wrap" style={{ position:"relative", zIndex:2, maxWidth:860, margin:"0 auto", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+
+            {/* Header */}
+            <div style={{ textAlign:"center", padding:"28px 0 14px" }}>
+              <div style={{ fontSize:11, letterSpacing:5, color:"#B85C34", marginBottom:6 }}>✦ HOWDY, PARTNER ✦</div>
+              <h1 style={{ fontSize:32, fontWeight:"bold", margin:0, letterSpacing:2, color:"#3D1C08", textTransform:"uppercase", textShadow:"2px 2px 0 rgba(180,100,40,0.2)" }}>
+                🤠 The Task Ranch
+              </h1>
+              <div style={{ fontSize:11, letterSpacing:2, color:"#9B7A5E", marginTop:5 }}>✦ Your Daily Wrangling Headquarters ✦</div>
+
+              {/* Live Clock */}
+              <div style={{ marginTop:14, display:"inline-flex", flexDirection:"column", alignItems:"center", background:"#FFF8EE", border:"2px solid #C4A47A", borderRadius:12, padding:"10px 20px", boxShadow:"2px 2px 0 #C4A47A44" }}>
+                <div style={{ fontSize:28, fontWeight:"bold", color:"#3D1C08", letterSpacing:2, fontVariantNumeric:"tabular-nums", fontFamily:"Georgia,serif" }}>
+                  {fmtClock(liveTime, clockTz)}
+                </div>
+                <div style={{ fontSize:11, color:"#9B7A5E", marginTop:2, letterSpacing:1 }}>
+                  {fmtDate(liveTime, clockTz)}
+                </div>
+                <select
+                  value={clockTz}
+                  onChange={e => saveClockTz(e.target.value)}
+                  style={{ marginTop:8, background:"#FFF8EE", border:"1px solid #C4A47A", color:"#B85C34", padding:"4px 8px", borderRadius:20, fontSize:11, fontFamily:"Georgia,serif", fontWeight:"700", cursor:"pointer", outline:"none" }}>
+                  <option value={localTz}>📍 Local ({localTz})</option>
+                  {TIMEZONES.map(t => <option key={t.tz} value={t.tz}>{t.label}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:10, justifyContent:"center" }}>
+                <div style={{ height:1, width:60, background:"linear-gradient(to right,transparent,#C4A47A)" }}/>
+                <span style={{ color:"#C4860A", fontSize:14 }}>✦</span>
+                <div style={{ height:1, width:60, background:"linear-gradient(to left,transparent,#C4A47A)" }}/>
+              </div>
+
+              {/* Daily Quote */}
+              {(() => {
+                const q = getDailyQuote();
+                return (
+                  <div style={{ marginTop:14, maxWidth:520, marginLeft:"auto", marginRight:"auto", background:"#FFF8EE", border:"2px solid #C4A47A55", borderLeft:"4px solid #C4860A", borderRadius:10, padding:"12px 16px", textAlign:"left", boxShadow:"2px 2px 0 #C4A47A22" }}>
+                    <div style={{ fontSize:10, letterSpacing:2, color:"#C4860A", fontWeight:"700", textTransform:"uppercase", marginBottom:7 }}>✦ Today's Wrangler Wisdom</div>
+                    <div style={{ fontSize:13, color:"#3D1C08", lineHeight:1.7, fontStyle:"italic", marginBottom:7 }}>"{q.quote}"</div>
+                    <div style={{ fontSize:11, color:"#9B7A5E", fontWeight:"700", textAlign:"right" }}>— {q.author}</div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display:"flex", gap:4, marginBottom:18, borderBottom:"2px solid #C4A47A55" }}>
+              {TABS.map(([key, icon, label]) => (
+                <button key={key} className="tab-btn" onClick={()=>setActiveTab(key)} style={{
+                  background: activeTab===key ? "#FFF8EE" : "transparent",
+                  border: activeTab===key ? "2px solid #C4A47A" : "2px solid transparent",
+                  borderBottom: activeTab===key ? "2px solid #FFF8EE" : "2px solid transparent",
+                  color: activeTab===key ? "#3D1C08" : "#9B7A5E",
+                  padding:"8px 16px", borderRadius:"8px 8px 0 0", fontSize:13,
+                  cursor:"pointer", fontFamily:"Georgia,serif", fontWeight:activeTab===key?"700":"400",
+                  marginBottom:"-2px", WebkitTapHighlightColor:"transparent",
+                }}>
+                  {icon} <span className="tab-label-full">{label}</span>
+                  <span className="tab-label-icon" style={{display:"none"}}></span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── SCHEDULE TAB ── */}
+            {activeTab === "schedule" && (
+              <div>
+                {/* Hours input */}
+                <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+                  <div style={{ fontSize:10, letterSpacing:2, color:"#C4860A", marginBottom:12, fontWeight:"700", textTransform:"uppercase" }}>🕐 What Are Yer Hours Today?</div>
+                  <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:4, flex:1, minWidth:120 }}>
+                      <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Shift Start</label>
+                      <select
+                        style={{ ...inp(), fontSize:14, fontWeight:"700", color:C("orange"), cursor:"pointer" }}
+                        value={shiftStart}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setShiftStart(v);
+                          setDayStart(v);
+                          applySchedule(v, shiftEnd);
+                        }}>
+                        {SHIFT_TIMES.slice(0, -1).map(t => (
+                          <option key={t} value={t}>{SHIFT_LABELS[t]}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ fontSize:18, color:"#C4A47A", fontWeight:"bold", paddingTop:18 }}>—</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:4, flex:1, minWidth:120 }}>
+                      <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Shift End</label>
+                      <select
+                        style={{ ...inp(), fontSize:14, fontWeight:"700", color:C("orange"), cursor:"pointer" }}
+                        value={shiftEnd}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setShiftEnd(v);
+                          setDayEnd(v);
+                          applySchedule(shiftStart, v);
+                        }}>
+                        {SHIFT_TIMES.slice(1).map(t => (
+                          <option key={t} value={t}>{SHIFT_LABELS[t]}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {schedErr && <div style={{ fontSize:11, color:"#B85673", marginTop:8 }}>⚠ {schedErr}</div>}
+                  <div style={{ fontSize:11, color:"#9B7A5E", marginTop:8 }}>
+                    Today's ride: <strong style={{ color:"#C4860A" }}>{SHIFT_LABELS[shiftStart] || fmt12(dayStart)}</strong> — <strong style={{ color:"#C4860A" }}>{SHIFT_LABELS[shiftEnd] || fmt12(dayEnd)}</strong>
+                    <span style={{ marginLeft:8, color:"#B8956A" }}>
+                      ({fmtDur(shiftTotal)})
+                    </span>
+                  </div>
+                </div>
+
+                {/* ── Notification permission banner ── */}
+                {notifPerm === 'default' && (
+                  <div style={{ background:"#FFF8EE", border:`2px solid ${C("purple")}`, borderRadius:10, padding:"12px 16px", marginBottom:12, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:18 }}>🔔</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, fontWeight:"700", color:C("purple") }}>Enable Trail Stop Notifications</div>
+                      <div style={{ fontSize:11, color:"#9B7A5E", marginTop:2 }}>Get a desktop ping when each new block starts and a 5-min warning before it ends.</div>
+                    </div>
+                    <button style={{ ...btn("purple", { padding:"8px 16px", fontSize:12 }) }} onClick={()=>{
+                      Notification.requestPermission().then(p => setNotifPerm(p));
+                    }}>Enable</button>
+                  </div>
+                )}
+                {notifPerm === 'granted' && (
+                  <div style={{ background:"#F0F7F0", border:`1.5px solid ${C("green")}44`, borderRadius:10, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:14 }}>🔔</span>
+                    <div style={{ flex:1, fontSize:11, color:C("green"), fontWeight:"700" }}>Notifications on — you'll get a ping at each trail stop</div>
+                    <button style={{ ...btn("pink", { padding:"4px 10px", fontSize:11 }) }} onClick={()=>{
+                      setNotifPerm('denied-by-user');
+                    }}>Mute</button>
+                  </div>
+                )}
+                {notifPerm === 'denied' && (
+                  <div style={{ background:"#FFF0F0", border:`1.5px solid ${C("pink")}44`, borderRadius:10, padding:"10px 14px", marginBottom:12, fontSize:11, color:C("pink") }}>
+                    🔕 Notifications blocked by your browser. To enable, click the lock icon in your address bar and allow notifications for this page.
+                  </div>
+                )}
+
+                {/* Summary */}
+                <div className="summary-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
+                  {[["🏇 Trail Stops", blocks.filter(b=>b.category!=="break").length,"cyan"],
+                    ["⏱ Ride Time", `${fmtDur(totalWork)}`, "pink"],
+                    ["🤠 Wrangling", `${fmtDur(commentMins)}`, "yellow"],
+                  ].map(([label,val,col])=>(
+                    <div key={label} style={{ ...card(col), background:"#FFF8EE", borderRadius:10, padding:"10px 8px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#9B7A5E", marginBottom:3, fontWeight:"600", textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+                      <div style={{ fontSize:20, fontWeight:"bold", ...acc(col) }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Quota breakdown */}
+                {cBlocks.length > 0 && (
+                  <div style={{ ...card("cyan"), background:"#F7F0E3", borderRadius:10, padding:"12px 14px", marginBottom:12 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, flexWrap:"wrap", gap:4 }}>
+                      <span style={{ fontSize:10, letterSpacing:1, color:"#3D8B8A", fontWeight:"700", textTransform:"uppercase" }}>✦ Quota Breakdown</span>
+                      <span style={{ fontSize:11, color:"#9B7A5E" }}>{remaining>0?`${remaining} left`:"🎉 Done!"}</span>
+                    </div>
+                    <div className="quota-mini-grid" style={{ display:"grid", gridTemplateColumns:`repeat(${Math.min(cBlocks.length,4)},1fr)`, gap:6 }}>
+                      {cBlocks.map((b,i)=>{
+                        const pct = Math.min(100, Math.round(((cDone[b.id]||0)/Math.max(1,cQuotas[b.id]||1))*100));
+                        return (
+                          <div key={b.id} style={{ background:"#FFF8EE", border:"1px solid #C4A47A44", borderRadius:8, padding:"6px 8px", textAlign:"center" }}>
+                            <div style={{ fontSize:9, color:"#9B7A5E", fontWeight:"600" }}>Batch {i+1}</div>
+                            <div style={{ fontSize:8, color:"#B8956A", margin:"2px 0" }}>{fmt12(b.start)}–{fmt12(b.end)}</div>
+                            <div style={{ fontSize:20, fontWeight:"bold", ...acc("cyan") }}>{cQuotas[b.id]||0}</div>
+                            <div style={{ fontSize:8, color:"#9B7A5E" }}>goal</div>
+                            <div style={{ background:"#E8D8C0", borderRadius:3, height:4, margin:"4px 0 2px", overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${pct}%`, background:`linear-gradient(90deg,${COLORS.cyan},${COLORS.purple})`, borderRadius:3 }}/>
+                            </div>
+                            <div style={{ fontSize:8, color:C("cyan"), fontWeight:"700" }}>{cDone[b.id]||0} done · {cTargets[b.id]||0} left</div>
+                            {(cTargets[b.id]||0)>0 && <div style={{ fontSize:9, color:C("yellow"), fontWeight:"700", marginTop:2 }}>{cCPH[b.id]}/hr needed</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── You Are Here banner ── */}
+                {activeBlock && (
+                  <div style={{ ...card(activeBlock.color), background:`linear-gradient(135deg,#FFF8EE,${C(activeBlock.color)}22)`, borderRadius:10, padding:"12px 16px", marginBottom:12, position:"relative", overflow:"hidden" }}>
+                    <div style={{ position:"absolute", bottom:0, left:0, height:4, width:`${blockProgress(activeBlock)}%`, background:C(activeBlock.color), transition:"width 1s linear", borderRadius:"0 2px 0 0" }}/>
+                    <div style={{ fontSize:9, letterSpacing:2, color:C(activeBlock.color), fontWeight:"700", textTransform:"uppercase", marginBottom:4 }}>📍 You Are Here</div>
+                    <div style={{ fontSize:15, fontWeight:"700", color:"#3D1C08", marginBottom:2 }}>{activeBlock.task}</div>
+                    <div style={{ display:"flex", gap:12, alignItems:"baseline", flexWrap:"wrap" }}>
+                      <span style={{ fontSize:12, fontWeight:"700", color:C(activeBlock.color) }}>{fmt12(activeBlock.start)} – {fmt12(activeBlock.end)}</span>
+                      <span style={{ fontSize:11, color:"#9B7A5E" }}>{blockProgress(activeBlock)}% through</span>
+                      <span style={{ fontSize:13, fontWeight:"700", color:C("yellow") }}>{minsLeftInBlock(activeBlock)}m remaining</span>
+                    </div>
+                  </div>
+                )}
+                {!activeBlock && nowInTz >= timeToMins(dayEnd) && (
+                  <div style={{ background:"#F0F7F0", border:`2px solid ${C("green")}`, borderRadius:10, padding:"12px 16px", marginBottom:12, textAlign:"center" }}>
+                    <div style={{ fontSize:14, fontWeight:"700", color:C("green") }}>🎉 Shift Complete — Ride's Over, Partner!</div>
+                  </div>
+                )}
+                {!activeBlock && nowInTz < timeToMins(dayStart) && (
+                  <div style={{ background:"#FFF8EE", border:`2px solid ${C("yellow")}`, borderRadius:10, padding:"12px 16px", marginBottom:12, textAlign:"center" }}>
+                    <div style={{ fontSize:13, fontWeight:"700", color:C("yellow") }}>⏳ Shift starts in {timeToMins(dayStart) - nowInTz}m — saddle up!</div>
+                  </div>
+                )}
+
+                {/* Blocks */}
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+                  {blocks.map(block=>(
+                    <div key={block.id}>
+                      {editingId===block.id ? (
+                        <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"12px 14px" }}>
+
+                          {/* ── Comment Mod: streamlined time-only edit ── */}
+                          {editForm.category === "comments" ? (
+                            <div>
+                              <div style={{ fontSize:11, color:C("cyan"), fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🤠 Edit Comment Moderation Block</div>
+                              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                                <div>
+                                  <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Start Time</label>
+                                  <input style={inp()} type="time" value={editForm.start} onChange={e=>setEditForm({...editForm, start:e.target.value})}/>
+                                </div>
+                                <div>
+                                  <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>End Time</label>
+                                  <input style={inp()} type="time" value={editForm.end} onChange={e=>setEditForm({...editForm, end:e.target.value})}/>
+                                </div>
+                              </div>
+                              {editForm.start && editForm.end && (
+                                <div style={{ fontSize:11, color:C("cyan"), marginBottom:10, fontWeight:"600" }}>
+                                  ⏱ {fmtDur(duration(editForm.start, editForm.end))} block
+                                  {duration(editForm.start, editForm.end) > 0 &&
+                                    <span style={{ color:C("yellow"), marginLeft:8 }}>
+                                      ~{Math.round(metrics.resolvedGoal * (totalCMins > 0 ? duration(editForm.start, editForm.end) / (totalCMins - duration(block.start, block.end) + duration(editForm.start, editForm.end)) : 0))} comments goal
+                                    </span>
+                                  }
+                                </div>
+                              )}
+                              <div style={{ display:"flex", gap:8 }}>
+                                <button style={btn("green")} onClick={saveEdit}>✓ Save</button>
+                                <button style={btn("pink")} onClick={()=>setEditingId(null)}>✕ Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* ── All other blocks: full edit form ── */
+                            <div>
+                              <div style={{ fontSize:11, color:C("yellow"), fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>✏️ Edit Block</div>
+                              <div className="edit-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                                <input className="edit-grid-full" style={{ ...inp(), gridColumn:"1/-1" }} value={editForm.task} onChange={e=>setEditForm({...editForm,task:e.target.value})} placeholder="Task name"/>
+                                <div>
+                                  <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Start Time</label>
+                                  <input style={inp()} type="time" value={editForm.start} onChange={e=>setEditForm({...editForm,start:e.target.value})}/>
+                                </div>
+                                <div>
+                                  <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>End Time</label>
+                                  <input style={inp()} type="time" value={editForm.end} onChange={e=>setEditForm({...editForm,end:e.target.value})}/>
+                                </div>
+                                <select style={inp()} value={editForm.category} onChange={e=>setEditForm({...editForm,category:e.target.value})}>
+                                  {Object.entries(CATEGORY_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                                </select>
+                                <select style={inp()} value={editForm.color} onChange={e=>setEditForm({...editForm,color:e.target.value})}>
+                                  {Object.keys(COLORS).map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                                </select>
+                              </div>
+                              <div style={{ display:"flex", gap:8 }}>
+                                <button style={btn("green")} onClick={saveEdit}>✓ Save</button>
+                                <button style={btn("pink")} onClick={()=>setEditingId(null)}>✕ Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ):(
+                        <div className="block-row" style={{
+                          ...card(block.color),
+                          background: getBlockStatus(block)==='active' ? `linear-gradient(135deg,#FFF8EE 80%,${C(block.color)}18)` : getBlockStatus(block)==='done' ? '#F5F0E8' : '#FFF8EE',
+                          borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10,
+                          opacity: getBlockStatus(block)==='done' ? 0.6 : 1,
+                          boxShadow: getBlockStatus(block)==='active' ? `0 0 0 2px ${C(block.color)}, 0 4px 16px ${C(block.color)}33` : undefined,
+                          position:"relative", overflow:"hidden",
+                        }}>
+                          {/* Active block time-progress underlay */}
+                          {getBlockStatus(block)==='active' && (
+                            <div style={{ position:"absolute", bottom:0, left:0, height:3, width:`${blockProgress(block)}%`, background:`linear-gradient(90deg,${C(block.color)},${C(block.color)}88)`, borderRadius:"0 2px 0 0", transition:"width 1s linear" }}/>
+                          )}
+                          {/* Done block strikethrough overlay */}
+                          {getBlockStatus(block)==='done' && (
+                            <div style={{ position:"absolute", inset:0, background:"repeating-linear-gradient(135deg,transparent,transparent 8px,rgba(0,0,0,0.02) 8px,rgba(0,0,0,0.02) 9px)", borderRadius:10, pointerEvents:"none" }}/>
+                          )}
+                          <div className="block-time" style={{ minWidth:130, fontSize:12, fontWeight:"700", ...acc(block.color), flexShrink:0, opacity: getBlockStatus(block)==='done'?0.7:1 }}>{fmt12(block.start)} – {fmt12(block.end)}</div>
+                          <div className="block-task" style={{ flex:1, fontSize:13, color: getBlockStatus(block)==='done'?"#9B7A5E":"#3D1C08", minWidth:0, textDecoration: getBlockStatus(block)==='done'?"line-through":undefined }}>{block.task}</div>
+                          {/* Status badge */}
+                          {getBlockStatus(block)==='active' && (
+                            <div style={{ fontSize:10, padding:"3px 10px", background:C(block.color), borderRadius:12, color:"#fff", fontWeight:"700", flexShrink:0, letterSpacing:1, animation:"bounce 0.6s infinite alternate" }}>▶ NOW</div>
+                          )}
+                          {getBlockStatus(block)==='done' && (
+                            <div style={{ fontSize:10, padding:"3px 10px", background:"#9B7A5E22", border:"1.5px solid #9B7A5E44", borderRadius:12, color:"#9B7A5E", fontWeight:"700", flexShrink:0 }}>✓ Done</div>
+                          )}
+                          {getBlockStatus(block)==='active' && (
+                            <div style={{ fontSize:10, padding:"3px 8px", background:C("yellow")+"22", border:`1.5px solid ${C("yellow")}`, borderRadius:12, color:C("yellow"), fontWeight:"700", flexShrink:0 }}>
+                              {minsLeftInBlock(block)}m left
+                            </div>
+                          )}
+                          {getBlockStatus(block)!=='active' && (
+                            <div style={{ fontSize:10, padding:"2px 8px", border:`1.5px solid ${C(block.color)}66`, borderRadius:12, color:C(block.color), fontWeight:"700", flexShrink:0 }}>{CATEGORY_LABELS[block.category]}</div>
+                          )}
+                          {block.category==="comments" && cCPH[block.id] > 0 && getBlockStatus(block)==='active' && (
+                            <div style={{ fontSize:11, padding:"2px 10px", background:C("yellow")+"22", border:`1.5px solid ${C("yellow")}`, borderRadius:12, color:C("yellow"), fontWeight:"700", flexShrink:0 }}>
+                              {cCPH[block.id]}/hr
+                            </div>
+                          )}
+                          {getBlockStatus(block)!=='active' && <div style={{ fontSize:11, color:"#9B7A5E", flexShrink:0 }}>{duration(block.start,block.end)}m</div>}
+                          <div className="block-actions" style={{ display:"flex", gap:6, flexShrink:0 }}>
+                            <button style={btn("yellow",{padding:"4px 12px",fontSize:12})} onClick={()=>startEdit(block)}>Edit</button>
+                            <button style={btn("pink",  {padding:"4px 12px",fontSize:12})} onClick={()=>delBlock(block.id)}>✕</button>
+                          </div>
+                          {block.category==="comments"&&(cQuotas[block.id]||0)>0&&(()=>{
+                            const quota     = cQuotas[block.id]||0;
+                            const done      = cDone[block.id]||0;
+                            const left      = cTargets[block.id]||0;
+                            const pct       = Math.min(100, Math.round((done/Math.max(1,quota))*100));
+                            const respQuota = cRespQuota[block.id]||0;
+                            const respDone  = cRespDone[block.id]||0;
+                            const respLeft  = cRespLeft[block.id]||0;
+                            const noResp    = cNoResp[block.id]||0;
+                            const respPct   = Math.min(100, Math.round((respDone/Math.max(1,respQuota))*100));
+                            return (
+                              <div style={{ width:"100%", marginTop:6, paddingTop:6, borderTop:`1px dashed ${C(block.color)}44` }}>
+                                {left>0 && (
+                                  <div style={{ background:"#FFF3E0", border:`1.5px solid ${C("yellow")}`, borderRadius:8, padding:"6px 10px", marginBottom:8, display:"flex", alignItems:"baseline", gap:6, flexWrap:"wrap" }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase", letterSpacing:1 }}>Needed pace</span>
+                                    <span style={{ fontSize:26, fontWeight:"bold", ...acc("yellow"), lineHeight:1 }}>{cCPH[block.id]}</span>
+                                    <span style={{ fontSize:12, color:"#C4860A", fontWeight:"700" }}>comments/hr</span>
+                                    <span style={{ fontSize:10, color:"#9B7A5E", marginLeft:4 }}>({left} left in {duration(block.start,block.end)}m)</span>
+                                  </div>
+                                )}
+                                {/* ── Comment totals row ── */}
+                                <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:5 }}>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Goal</span>
+                                    <span style={{ fontSize:22, fontWeight:"bold", ...acc("cyan") }}>{quota}</span>
+                                  </div>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Done</span>
+                                    <span style={{ fontSize:16, fontWeight:"700", ...acc("green") }}>{done}</span>
+                                  </div>
+                                  <div style={{ display:"flex", alignItems:"baseline", gap:3 }}>
+                                    <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase" }}>Left</span>
+                                    <span style={{ fontSize:16, fontWeight:"700", ...acc(left>0?"yellow":"green") }}>{left>0?left:"✓"}</span>
+                                  </div>
+                                </div>
+                                {/* ── Progress bar ── */}
+                                <div style={{ background:"#E8D8C0", borderRadius:4, height:6, overflow:"hidden", marginBottom:2 }}>
+                                  <div style={{ height:"100%", width:`${pct}%`, background:pct>=100?`linear-gradient(90deg,${C("green")},${C("cyan")})`:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:4, transition:"width 0.4s" }}/>
+                                </div>
+                                <div style={{ fontSize:9, color:"#9B7A5E", textAlign:"right", marginBottom:8 }}>{pct}% of batch goal</div>
+
+                                {/* ── Response + No-response breakdown ── */}
+                                {quota>0 && (
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginTop:2 }}>
+                                    {/* Needs response */}
+                                    <div style={{ background:"#FDF0F4", border:`1.5px solid ${C("pink")}44`, borderRadius:8, padding:"7px 10px" }}>
+                                      <div style={{ fontSize:9, color:C("pink"), fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>💌 Needs Reply</div>
+                                      <div style={{ display:"flex", alignItems:"baseline", gap:4, marginBottom:3 }}>
+                                        <span style={{ fontSize:20, fontWeight:"bold", color:C("pink") }}>{respLeft>0?respLeft:"✓"}</span>
+                                        <span style={{ fontSize:10, color:"#9B7A5E" }}>left</span>
+                                        <span style={{ fontSize:10, color:"#B8956A", marginLeft:4 }}>/ {respQuota} goal</span>
+                                      </div>
+                                      <div style={{ background:"#E8D8C0", borderRadius:3, height:4, overflow:"hidden", marginBottom:3 }}>
+                                        <div style={{ height:"100%", width:`${respPct}%`, background:`linear-gradient(90deg,${C("pink")},${C("yellow")})`, borderRadius:3, transition:"width 0.4s" }}/>
+                                      </div>
+                                      <div style={{ fontSize:8, color:C("pink"), fontWeight:"700" }}>{respDone} done · {respPct}%</div>
+                                    </div>
+                                    {/* Mod only */}
+                                    <div style={{ background:"#F0F7F7", border:`1.5px solid ${C("cyan")}44`, borderRadius:8, padding:"7px 10px" }}>
+                                      <div style={{ fontSize:9, color:C("cyan"), fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>🤠 Mod Only</div>
+                                      <div style={{ display:"flex", alignItems:"baseline", gap:4, marginBottom:3 }}>
+                                        <span style={{ fontSize:20, fontWeight:"bold", color:C("cyan") }}>{noResp>0?noResp:"✓"}</span>
+                                        <span style={{ fontSize:10, color:"#9B7A5E" }}>left</span>
+                                        <span style={{ fontSize:10, color:"#B8956A", marginLeft:4 }}>/ {Math.max(0,quota-respQuota)} goal</span>
+                                      </div>
+                                      <div style={{ background:"#E8D8C0", borderRadius:3, height:4, overflow:"hidden", marginBottom:3 }}>
+                                        <div style={{ height:"100%", width:`${noResp===0?100:Math.round(((quota-respQuota-noResp)/Math.max(1,quota-respQuota))*100)}%`, background:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:3, transition:"width 0.4s" }}/>
+                                      </div>
+                                      <div style={{ fontSize:8, color:C("cyan"), fontWeight:"700" }}>
+                                        {Math.max(0,(quota-respQuota)-(noResp))} done · {noResp===0?100:Math.round(((quota-respQuota-noResp)/Math.max(1,quota-respQuota))*100)}%
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add block */}
+                {!showAdd ? (
+                  <button style={{ ...btn("green"), width:"100%", padding:"12px", fontSize:14 }} onClick={()=>{ setShowAdd(true); setAddMode("choice"); }}>＋ Add Trail Stop</button>
+                ):(
+                  <div style={{ ...card("green"), background:"#F7F5EE", borderRadius:10, padding:"14px" }}>
+                    <div style={{ fontSize:11, color:C("green"), marginBottom:12, fontWeight:"700", textTransform:"uppercase" }}>✦ New Trail Stop</div>
+
+                    {/* ── Mode: Choice ── */}
+                    {addMode === "choice" && (
+                      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                        {/* Comment Mod quick-add */}
+                        <button
+                          style={{ ...btn("cyan"), padding:"14px", fontSize:14, textAlign:"left", display:"flex", alignItems:"center", gap:12, width:"100%" }}
+                          onClick={()=>setAddMode("comment")}>
+                          <span style={{ fontSize:22 }}>🤠</span>
+                          <div>
+                            <div style={{ fontWeight:"700", fontSize:13 }}>Comment Moderation Block</div>
+                            <div style={{ fontSize:11, color:C("cyan"), opacity:0.8, fontWeight:"400" }}>Add a 1-hour comment mod block — just pick the time</div>
+                          </div>
+                        </button>
+                        {/* Custom block */}
+                        <button
+                          style={{ ...btn("green"), padding:"14px", fontSize:14, textAlign:"left", display:"flex", alignItems:"center", gap:12, width:"100%" }}
+                          onClick={()=>setAddMode("custom")}>
+                          <span style={{ fontSize:22 }}>✏️</span>
+                          <div>
+                            <div style={{ fontWeight:"700", fontSize:13 }}>Custom Time Block</div>
+                            <div style={{ fontSize:11, color:C("green"), opacity:0.8, fontWeight:"400" }}>Write your own task name, time, category & color</div>
+                          </div>
+                        </button>
+                        <button style={btn("pink")} onClick={()=>setShowAdd(false)}>Cancel</button>
+                      </div>
+                    )}
+
+                    {/* ── Mode: Comment Mod ── */}
+                    {addMode === "comment" && (
+                      <div>
+                        <div style={{ fontSize:12, color:C("cyan"), fontWeight:"700", marginBottom:10 }}>🤠 Comment Moderation Block</div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+                          <div>
+                            <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>Start Time</label>
+                            <input style={inp()} type="time" value={cmStart} onChange={e=>setCmStart(e.target.value)}/>
+                          </div>
+                          <div>
+                            <label style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:4 }}>End Time</label>
+                            <input style={inp()} type="time" value={cmEnd} onChange={e=>setCmEnd(e.target.value)}/>
+                          </div>
+                        </div>
+                        {cmStart && cmEnd && timeToMins(cmEnd) > timeToMins(cmStart) && (
+                          <div style={{ fontSize:11, color:C("cyan"), marginBottom:10, fontWeight:"600" }}>
+                            ⏱ {fmtDur(duration(cmStart, cmEnd))} comment mod block
+                          </div>
+                        )}
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button style={btn("cyan")} onClick={addCommentBlock} disabled={!cmStart||!cmEnd}>✓ Add Block</button>
+                          <button style={btn("yellow")} onClick={()=>setAddMode("choice")}>← Back</button>
+                          <button style={btn("pink")} onClick={()=>{ setShowAdd(false); setAddMode("choice"); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Mode: Custom ── */}
+                    {addMode === "custom" && (
+                      <div>
+                        <div style={{ fontSize:12, color:C("green"), fontWeight:"700", marginBottom:10 }}>✏️ Custom Time Block</div>
+                        <div className="add-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                          <input className="add-grid-name" style={{ ...inp(), gridColumn:"1/-1" }} placeholder="Task name" value={newTask.task} onChange={e=>setNewTask({...newTask,task:e.target.value})}/>
+                          <input style={inp()} type="time" value={newTask.start} onChange={e=>setNewTask({...newTask,start:e.target.value})}/>
+                          <input style={inp()} type="time" value={newTask.end}   onChange={e=>setNewTask({...newTask,end:e.target.value})}/>
+                          <select style={inp()} value={newTask.category} onChange={e=>setNewTask({...newTask,category:e.target.value})}>
+                            {Object.entries(CATEGORY_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                          </select>
+                          <select style={inp()} value={newTask.color} onChange={e=>setNewTask({...newTask,color:e.target.value})}>
+                            {Object.keys(COLORS).map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button style={btn("green")} onClick={()=>{ addBlock(); setAddMode("choice"); }}>✓ Add Block</button>
+                          <button style={btn("yellow")} onClick={()=>setAddMode("choice")}>← Back</button>
+                          <button style={btn("pink")} onClick={()=>{ setShowAdd(false); setAddMode("choice"); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── METRICS TAB ── */}
+            {activeTab === "metrics" && (
+              <div>
+
+                <div className="metrics-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:18 }}>
+                  {/* Resolved */}
+                  <div style={{ ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>🤠 Comments Wrangled</div>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                      <span style={{ fontSize:36, fontWeight:"bold", ...acc("cyan") }}>{metrics.resolved}</span>
+                      <span style={{ color:"#9B7A5E", fontSize:14 }}>/ {rGoal}</span>
+                    </div>
+                    <div style={{ background:"#E8D8C0", borderRadius:6, height:10, marginBottom:5, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${rPct}%`, background:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    </div>
+                    <div style={{ fontSize:11, color:C("cyan"), textAlign:"right", fontWeight:"700", marginBottom:12 }}>{rPct}% of quota</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Current Tally</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                          <input style={{ ...inp(), flex:1, minWidth:60 }} type="number" min="0" value={metrics.resolved} onChange={e=>setMetrics({...metrics,resolved:Math.max(0,parseInt(e.target.value)||0)})}/>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:Math.max(0,metrics.resolved-1)})}>−1</button>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:metrics.resolved+1})}>+1</button>
+                          <button style={btn("cyan",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,resolved:metrics.resolved+10})}>+10</button>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Daily Quota</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                          <input style={{ ...inp(), flex:1 }} type="number" min="1" value={metrics.resolvedGoal} onChange={e=>setMetrics({...metrics,resolvedGoal:Math.max(1,parseInt(e.target.value)||1)})}/>
+                          <button style={btn("orange",{fontSize:11})} onClick={()=>setMetrics({...metrics,resolved:0})}>Reset</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Responses */}
+                  <div style={{ ...card("pink"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>💌 Replies Written</div>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                      <span style={{ fontSize:36, fontWeight:"bold", ...acc("pink") }}>{metrics.responses}</span>
+                      <span style={{ color:"#9B7A5E", fontSize:14 }}>/ {rsGoal}</span>
+                    </div>
+                    <div style={{ background:"#E8D8C0", borderRadius:6, height:10, marginBottom:5, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:`${rsPct}%`, background:`linear-gradient(90deg,${C("pink")},${C("yellow")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    </div>
+                    <div style={{ fontSize:11, color:C("pink"), textAlign:"right", fontWeight:"700", marginBottom:12 }}>{rsPct}% of quota</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Current Tally</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap" }}>
+                          <input style={{ ...inp(), flex:1, minWidth:60 }} type="number" min="0" value={metrics.responses} onChange={e=>setMetrics({...metrics,responses:Math.max(0,parseInt(e.target.value)||0)})}/>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:Math.max(0,metrics.responses-1)})}>−1</button>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:metrics.responses+1})}>+1</button>
+                          <button style={btn("pink",{padding:"8px 10px"})} onClick={()=>setMetrics({...metrics,responses:metrics.responses+5})}>+5</button>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize:10, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1 }}>Daily Quota</label>
+                        <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                          <input style={{ ...inp(), flex:1 }} type="number" min="1" value={metrics.responseGoal} onChange={e=>setMetrics({...metrics,responseGoal:Math.max(1,parseInt(e.target.value)||1)})}/>
+                          <button style={btn("orange",{fontSize:11})} onClick={()=>setMetrics({...metrics,responses:0})}>Reset</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rate */}
+                <div style={{ ...card("yellow"), background:"#FFF8EE", borderRadius:10, padding:"16px", marginBottom:14 }}>
+                  <div style={{ fontSize:10, letterSpacing:1, color:"#9B7A5E", marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>📊 Reply Rate Roundup</div>
+                  <div className="rate-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:12 }}>
+                    {[["Yer Rate",`${rRate}%`,parseFloat(rRate)>=10?"green":"pink"],
+                      ["Target","10.0%","yellow"],
+                      ["Needed",Math.max(0,Math.ceil(metrics.resolved*0.1)-metrics.responses),"cyan"],
+                    ].map(([label,val,col])=>(
+                      <div key={label} style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:9, color:"#9B7A5E", fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>{label}</div>
+                        <div style={{ fontSize:24, fontWeight:"bold", ...acc(col) }}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ background:"#E8D8C0", borderRadius:6, height:14, overflow:"hidden", position:"relative" }}>
+                    <div style={{ height:"100%", width:`${Math.min(100,parseFloat(rRate)*10)}%`, background:parseFloat(rRate)>=10?`linear-gradient(90deg,${C("green")},${C("yellow")})`:`linear-gradient(90deg,${C("pink")},${C("yellow")})`, borderRadius:6, transition:"width 0.4s" }}/>
+                    <div style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", fontSize:9, color:"#3D1C08", fontWeight:"bold", whiteSpace:"nowrap" }}>{rRate}% / 10% target</div>
+                  </div>
+                </div>
+
+                {/* Batch Distribution */}
+                {cBlocks.length > 0 && (
+                  <div style={{ ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"16px", marginBottom:14 }}>
+                    <div style={{ fontSize:10, letterSpacing:1, color:C("cyan"), marginBottom:12, fontWeight:"700", textTransform:"uppercase" }}>🗂 Comment Batch Distribution</div>
+                      {remaining > 0 && (
+                      <div style={{ background:"#FFF3E0", border:`1.5px solid ${C("yellow")}`, borderRadius:8, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:9, color:"#9B7A5E", textTransform:"uppercase", letterSpacing:1 }}>Overall pace needed</span>
+                        <span style={{ fontSize:30, fontWeight:"bold", ...acc("yellow"), lineHeight:1 }}>{overallCPH}</span>
+                        <span style={{ fontSize:13, color:"#C4860A", fontWeight:"700" }}>comments/hr</span>
+                        <span style={{ fontSize:11, color:"#9B7A5E" }}>across {fmtDur(totalCMins)} of wrangling time</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize:11, color:"#9B7A5E", marginBottom:12 }}>
+                      Your {metrics.resolvedGoal} comment goal, split across each wrangling block by time:
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {cBlocks.map((b,i)=>{
+                        const quota = cQuotas[b.id]||0;
+                        const done  = cDone[b.id]||0;
+                        const left  = cTargets[b.id]||0;
+                        const pct   = Math.min(100, Math.round((done/Math.max(1,quota))*100));
+                        return (
+                          <div key={b.id} style={{ background:"#F7F0E3", border:"1px solid #C4A47A33", borderRadius:8, padding:"10px 12px" }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:6 }}>
+                              <div>
+                                <span style={{ fontSize:11, fontWeight:"700", color:C("cyan") }}>Batch {i+1}</span>
+                                <span style={{ fontSize:10, color:"#9B7A5E", marginLeft:8 }}>{fmt12(b.start)} – {fmt12(b.end)} · {duration(b.start,b.end)}m</span>
+                              </div>
+                              <div style={{ display:"flex", gap:10, alignItems:"baseline", flexWrap:"wrap" }}>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Goal: <strong style={acc("cyan")}>{quota}</strong></span>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Done: <strong style={acc("green")}>{done}</strong></span>
+                                <span style={{ fontSize:10, color:"#9B7A5E" }}>Left: <strong style={acc(left>0?"yellow":"green")}>{left>0?left:"✓"}</strong></span>
+                                {left>0 && <span style={{ fontSize:10, color:C("yellow"), fontWeight:"700" }}>⚡ {cCPH[b.id]}/hr</span>}
+                              </div>
+                            </div>
+                            <div style={{ background:"#E8D8C0", borderRadius:4, height:8, overflow:"hidden" }}>
+                              <div style={{ height:"100%", width:`${pct}%`, background:pct>=100?`linear-gradient(90deg,${C("green")},${C("cyan")})`:`linear-gradient(90deg,${C("cyan")},${C("purple")})`, borderRadius:4, transition:"width 0.4s" }}/>
+                            </div>
+                            <div style={{ fontSize:9, color:"#9B7A5E", textAlign:"right", marginTop:3 }}>{pct}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop:10, paddingTop:10, borderTop:"1px dashed #C4A47A55", display:"flex", justifyContent:"space-between", fontSize:11, flexWrap:"wrap", gap:4 }}>
+                      <span style={{ color:"#9B7A5E" }}>Total goal: <strong style={acc("cyan")}>{metrics.resolvedGoal}</strong></span>
+                      <span style={{ color:"#9B7A5E" }}>Done: <strong style={acc("green")}>{metrics.resolved}</strong></span>
+                      <span style={{ color:"#9B7A5E" }}>Remaining: <strong style={acc(remaining>0?"yellow":"green")}>{remaining>0?remaining:"✓ All done!"}</strong></span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status */}
+                <div style={{ ...card(rPct>=100&&rsPct>=100?"green":"purple"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, fontWeight:"700", ...acc(rPct>=100&&rsPct>=100?"green":"purple") }}>
+                    {rPct>=100&&rsPct>=100?"🎉 Yeehaw — All Goals Met, Cowpoke!":rPct>=50?"🐴 On the Trail — Keep Ridin'!":"⚡ Fallin' Behind — Giddy Up!"}
+                  </div>
+                  <div style={{ fontSize:11, color:"#9B7A5E", marginTop:5 }}>
+                    {rGoal-metrics.resolved>0?`${rGoal-metrics.resolved} comments left to hit yer daily quota`:"Comments quota complete, partner!"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── AI TAB ── */}
+            {activeTab === "ai" && (
+              <div>
+
+                {/* Mode switcher */}
+                <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+                  {[["single","🌟","Find a Slot"],["build","🏗","Build My Day"]].map(([mode,icon,label])=>(
+                    <button key={mode} onClick={()=>{ setAiMode(mode); setAiSugg(null); setBuildPlan(null); }} style={{
+                      flex:1, padding:"10px 8px", borderRadius:8, fontSize:12, fontWeight:"700",
+                      fontFamily:"Georgia,serif", cursor:"pointer", letterSpacing:0.5,
+                      background: aiMode===mode ? C("purple")+"22" : "transparent",
+                      border: aiMode===mode ? `2px solid ${C("purple")}` : "2px solid #C4A47A55",
+                      color: aiMode===mode ? C("purple") : "#9B7A5E",
+                      WebkitTapHighlightColor:"transparent",
+                    }}>{icon} {label}</button>
+                  ))}
+                </div>
+
+                {/* ── Single task mode ── */}
+                {aiMode === "single" && (
+                  <div>
+                    <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"18px", marginBottom:14 }}>
+                      <div style={{ fontSize:11, letterSpacing:1, color:C("purple"), marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>🌟 Trail Boss Planner</div>
+                      <div style={{ fontSize:13, color:"#6B4E35", marginBottom:14, lineHeight:1.7 }}>Describe a new task and the Trail Boss will analyze your free gaps, protect your comment batches, and place it in the <strong>most efficient slot</strong> — without disrupting your wrangling flow.</div>
+                      <textarea style={{ ...inp(), minHeight:80, resize:"vertical", marginBottom:10 }}
+                        placeholder="e.g. '30 min 1:1 with my manager'"
+                        value={aiInput} onChange={e=>setAiInput(e.target.value)}
+                      />
+                      <button style={{ ...btn("purple"), width:"100%", padding:"12px", fontSize:13, opacity:aiLoading?0.5:1 }} onClick={askAI} disabled={aiLoading}>
+                        {aiLoading?"🔍 Scoutin' the trail...":"🌟 Find the Best Slot"}
+                      </button>
+                    </div>
+
+                    {aiLoading&&(
+                      <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"20px", textAlign:"center" }}>
+                        <div style={{ fontSize:13, fontWeight:"700", ...acc("purple") }}>Scoutin' the trail...</div>
+                        <div style={{ marginTop:10, display:"flex", justifyContent:"center", gap:8 }}>
+                          {[0,1,2,3,4].map(i=><div key={i} style={{ width:9, height:9, background:C("purple"), borderRadius:"50%", animation:`bounce ${0.6+i*0.1}s infinite alternate` }}/>)}
+                        </div>
+                      </div>
+                    )}
+
+                    {aiSugg&&!aiSugg.error&&(
+                      <div style={{ ...card(aiSugg.adjustedBlocks?"yellow":"green"), background:"#FFF8EE", borderRadius:10, padding:"16px" }}>
+                        <div style={{ fontSize:10, letterSpacing:1, color:C(aiSugg.adjustedBlocks?"yellow":"green"), marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>
+                          {aiSugg.adjustedBlocks ? "⚙ Schedule Adjusted to Fit" : "✦ Recommended Trail Stop"}
+                        </div>
+                        <div style={{ fontSize:15, color:"#3D1C08", marginBottom:4, fontWeight:"600" }}>{aiSugg.task}</div>
+                        <div style={{ fontSize:13, fontWeight:"700", ...acc("green"), marginBottom:8 }}>{fmt12(aiSugg.start)} – {fmt12(aiSugg.end)}</div>
+                        <div style={{ fontSize:12, color:"#6B4E35", borderTop:"1px dashed #C4A47A", paddingTop:10, marginBottom:aiSugg.changes?.length>0?8:12, lineHeight:1.6 }}>{aiSugg.reason}</div>
+                        {aiSugg.changes?.length > 0 && (
+                          <div style={{ marginBottom:12, background:"#FFF8E0", border:`1.5px solid ${C("yellow")}44`, borderRadius:8, padding:"10px 12px" }}>
+                            <div style={{ fontSize:10, color:C("yellow"), fontWeight:"700", textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>📋 Blocks Being Adjusted</div>
+                            {aiSugg.changes.map((c,i) => (
+                              <div key={i} style={{ display:"flex", flexWrap:"wrap", gap:4, alignItems:"center", marginBottom:i<aiSugg.changes.length-1?6:0, fontSize:11 }}>
+                                <span style={{ color:"#3D1C08", fontWeight:"600", flex:"1 1 120px" }}>{c.name}</span>
+                                <span style={{ color:"#B85673", textDecoration:"line-through", whiteSpace:"nowrap" }}>{c.from}</span>
+                                <span style={{ color:"#9B7A5E" }}>→</span>
+                                <span style={{ color:"#5E8B5A", fontWeight:"700", whiteSpace:"nowrap" }}>{c.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button style={{ ...btn("green"), flex:1, padding:"10px" }} onClick={acceptSugg}>
+                            🤠 {aiSugg.adjustedBlocks ? "Apply Changes & Add Task" : "Ride It — Add to Schedule"}
+                          </button>
+                          <button style={btn("pink")} onClick={()=>setAiSugg(null)}>Nope</button>
+                        </div>
+                      </div>
+                    )}
+                    {aiSugg?.error&&(
+                      <div style={{ ...card("pink"), background:"#FFF8EE", borderRadius:10, padding:"12px", color:C("pink"), fontSize:12, fontWeight:"600" }}>⚠ {aiSugg.error}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Build My Day mode ── */}
+                {aiMode === "build" && (
+                  <div>
+                    <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"18px", marginBottom:14 }}>
+                      <div style={{ fontSize:11, letterSpacing:1, color:C("purple"), marginBottom:8, fontWeight:"700", textTransform:"uppercase" }}>🏗 Build My Day</div>
+                      <div style={{ fontSize:13, color:"#6B4E35", marginBottom:14, lineHeight:1.7 }}>
+                        Write your tasks for the day — one per line. Add a duration hint like <strong>30min</strong> or <strong>1hr</strong> and the Trail Boss will pack them into your shift in order.
+                      </div>
+                      <div style={{ fontSize:11, color:"#9B7A5E", marginBottom:10, background:"#F0EAD8", borderRadius:8, padding:"8px 12px", lineHeight:1.8 }}>
+                        <strong style={{ color:C("yellow") }}>Examples:</strong><br/>
+                        Morning standup 15min<br/>
+                        Comment moderation 2hr<br/>
+                        Lunch break 30min<br/>
+                        Filmmaker leads 30min<br/>
+                        EOD wrap-up 15min
+                      </div>
+                      <textarea style={{ ...inp(), minHeight:160, resize:"vertical", marginBottom:10 }}
+                        placeholder={"Task one 30min\nTask two 1hr\nLunch break 30min\n..."}
+                        value={buildInput} onChange={e=>setBuildInput(e.target.value)}
+                      />
+                      <div style={{ fontSize:11, color:"#9B7A5E", marginBottom:10 }}>
+                        Shift: <strong style={{ color:C("orange") }}>{SHIFT_LABELS[shiftStart] || fmt12(dayStart)}</strong> – <strong style={{ color:C("orange") }}>{SHIFT_LABELS[shiftEnd] || fmt12(dayEnd)}</strong>
+                        <span style={{ marginLeft:8 }}>({fmtDur(shiftTotal)} available)</span>
+                      </div>
+                      <button style={{ ...btn("purple"), width:"100%", padding:"12px", fontSize:13, opacity:buildLoading?0.5:1 }} onClick={buildMyDay} disabled={buildLoading}>
+                        {buildLoading?"🔍 Wranglin' yer schedule...":"🏗 Build My Schedule"}
+                      </button>
+                    </div>
+
+                    {buildLoading&&(
+                      <div style={{ ...card("purple"), background:"#FFF8EE", borderRadius:10, padding:"20px", textAlign:"center" }}>
+                        <div style={{ fontSize:13, fontWeight:"700", ...acc("purple") }}>Wranglin' yer tasks into order...</div>
+                        <div style={{ marginTop:10, display:"flex", justifyContent:"center", gap:8 }}>
+                          {[0,1,2,3,4].map(i=><div key={i} style={{ width:9, height:9, background:C("purple"), borderRadius:"50%", animation:`bounce ${0.6+i*0.1}s infinite alternate` }}/>)}
+                        </div>
+                      </div>
+                    )}
+
+                    {buildPlan&&!buildPlan.error&&(
+                      <div style={{ ...card("green"), background:"#FFF8EE", borderRadius:10, padding:"16px", marginBottom:14 }}>
+                        <div style={{ fontSize:10, letterSpacing:1, color:C("green"), marginBottom:4, fontWeight:"700", textTransform:"uppercase" }}>✦ Yer Day, All Wrangled Up</div>
+                        <div style={{ fontSize:11, color:"#9B7A5E", marginBottom:12 }}>
+                          {buildPlan.blocks.length} blocks · {fmtDur(buildPlan.totalMins)} scheduled · {fmtDur(buildPlan.shiftMins - buildPlan.totalMins)} free
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+                          {buildPlan.blocks.map((b,i)=>{
+                            const col = COLORS[b.color]||COLORS.green;
+                            return (
+                              <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:8, border:`1.5px solid ${col}44`, background:"#FFFBF0", flexWrap:"wrap" }}>
+                                <span style={{ fontSize:12, fontWeight:"700", color:col, minWidth:130, flexShrink:0 }}>{fmt12(b.start)} – {fmt12(b.end)}</span>
+                                <span style={{ fontSize:13, color:"#3D1C08", flex:1 }}>{b.task}</span>
+                                <span style={{ fontSize:10, padding:"2px 8px", border:`1.5px solid ${col}66`, borderRadius:12, color:col, fontWeight:"700", flexShrink:0 }}>{b.category}</span>
+                                <span style={{ fontSize:11, color:"#9B7A5E", flexShrink:0 }}>{b.actualMins}m</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button style={{ ...btn("green"), flex:1, padding:"10px", fontSize:13 }} onClick={acceptBuildPlan}>
+                            🤠 Load This Schedule — Let's Ride!
+                          </button>
+                          <button style={btn("pink")} onClick={()=>setBuildPlan(null)}>Nope</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {buildPlan?.error&&(
+                      <div style={{ ...card("pink"), background:"#FFF8EE", borderRadius:10, padding:"12px", color:C("pink"), fontSize:12, fontWeight:"600" }}>⚠ {buildPlan.error}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Trail map — always visible */}
+                <div style={{ marginTop:16, ...card("cyan"), background:"#FFF8EE", borderRadius:10, padding:"14px 16px" }}>
+                  <div style={{ fontSize:10, letterSpacing:1, color:C("cyan"), marginBottom:10, fontWeight:"700", textTransform:"uppercase" }}>🗺 Today's Trail Map</div>
+                  {blocks.map(b=>(
+                    <div key={b.id} style={{ display:"flex", gap:10, padding:"5px 0", borderBottom:"1px dashed #C4A47A33", fontSize:12, flexWrap:"wrap" }}>
+                      <span style={{ color:C(b.color), minWidth:140, fontWeight:"700" }}>{fmt12(b.start)}–{fmt12(b.end)}</span>
+                      <span style={{ color:"#3D1C08" }}>{b.task}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>{/* /safe-wrap */}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
